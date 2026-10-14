@@ -1,0 +1,6 @@
+# Only upload the prebuilt Flutter web app (run `flutter build web --release` first).
+/*
+!/build
+/build/*
+!/build/web
+!/vercel.json
