@@ -1,0 +1,8 @@
+{
+  "source": "config",
+  "alerts": [
+    {"api": 120, "region_en": "Klang Valley", "region_ms": "Lembah Klang",
+     "en": "Haze alert: API 120 (unhealthy). Plant a tree in Haze Royale and stay indoors today!",
+     "ms": "Amaran jerebu: IPU 120 (tidak sihat). Tanam pokok dalam Haze Royale dan duduk di dalam rumah hari ini!"}
+  ]
+}

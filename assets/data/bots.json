@@ -1,0 +1,17 @@
+{
+  "count": 24,
+  "speed": 210,
+  "player_speed": 225,
+  "aim_error_deg": [5, 20],
+  "reaction_time": [0.18, 0.6],
+  "aggression": [0.2, 0.6],
+  "sight_range": 520,
+  "think_interval_near": 0.12,
+  "think_interval_far": 0.5,
+  "near_distance": 1300,
+  "plant_chance": 0.35,
+  "retreat_health": 35,
+  "names": ["Aiman", "Siti", "Hafiz", "Mei Ling", "Arjun", "Nurul", "Wei Jie", "Kavitha", "Faris", "Aisyah",
+            "Daniel", "Priya", "Hakim", "Farah", "Jason", "Zul", "Amirah", "Kumar", "Syafiq", "Liyana",
+            "Hui Min", "Irfan", "Balqis", "Ravi"]
+}

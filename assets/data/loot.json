@@ -1,0 +1,21 @@
+{
+  "starting_weapon": "splash_pistol",
+  "pickup_radius": 42,
+  "per_building": [2, 3],
+  "outdoor_spawns": 70,
+  "armour": [
+    {"id": "vest_1", "tier": 1, "armour": 50, "absorb": 0.4, "name_en": "Light Vest", "name_ms": "Jaket Ringan"},
+    {"id": "vest_2", "tier": 2, "armour": 100, "absorb": 0.55, "name_en": "Heavy Vest", "name_ms": "Jaket Berat"}
+  ],
+  "consumables": [
+    {"id": "water_bottle", "heal": 30, "use_time": 1.5, "haze_shield": 0, "max_carry": 5, "per_pickup": 1,
+     "name_en": "Water Bottle", "name_ms": "Botol Air"},
+    {"id": "air_mask", "heal": 10, "use_time": 1.0, "haze_shield": 20, "max_carry": 3, "per_pickup": 1,
+     "name_en": "Air Mask", "name_ms": "Topeng Udara"}
+  ],
+  "seed_pack": {"id": "seed_pack", "per_pickup": 2, "max_carry": 6, "name_en": "Seed Pack", "name_ms": "Paket Benih"},
+  "spawn_weights": {
+    "soaker_rifle": 12, "bubble_launcher": 5, "vest_1": 10, "vest_2": 4,
+    "water_bottle": 22, "air_mask": 12, "seed_pack": 20
+  }
+}

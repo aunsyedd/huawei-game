@@ -1,0 +1,14 @@
+{
+  "drop_time": 10,
+  "initial_radius": 2200,
+  "mask_damage_factor": 0.25,
+  "final_bubble_wither_rate": 12,
+  "max_match_time": 600,
+  "phases": [
+    {"warning": 35, "shrink": 30, "radius_fraction": 0.58, "dps": 2},
+    {"warning": 28, "shrink": 24, "radius_fraction": 0.34, "dps": 4},
+    {"warning": 22, "shrink": 20, "radius_fraction": 0.18, "dps": 6},
+    {"warning": 18, "shrink": 18, "radius_fraction": 0.07, "dps": 9},
+    {"warning": 14, "shrink": 16, "radius_fraction": 0.0, "dps": 14}
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "width": 3000,
+  "height": 3000,
+  "seed": 20251014,
+  "wall_thickness": 12,
+  "door_width": 64,
+  "areas": [
+    {"type": "forest", "rect": [0, 0, 1300, 1200], "buildings": 2, "building_w": [150, 190], "building_h": [120, 150],
+     "obstacles": 110, "obstacle": "tree", "obstacle_radius": [20, 32]},
+    {"type": "plantation", "rect": [1300, 0, 1700, 1300], "buildings": 3, "building_w": [170, 220], "building_h": [130, 160],
+     "obstacles": 0, "obstacle": "palm_grid", "obstacle_radius": [12, 15], "grid_spacing": 150},
+    {"type": "kampung", "rect": [0, 1200, 1300, 1400], "buildings": 8, "building_w": [160, 220], "building_h": [130, 170],
+     "obstacles": 30, "obstacle": "palm", "obstacle_radius": [12, 15]},
+    {"type": "town", "rect": [1300, 1300, 1700, 1300], "buildings": 10, "building_w": [210, 300], "building_h": [160, 210],
+     "obstacles": 12, "obstacle": "rock", "obstacle_radius": [14, 20]},
+    {"type": "beach", "rect": [0, 2600, 3000, 400], "buildings": 4, "building_w": [120, 150], "building_h": [100, 120],
+     "obstacles": 22, "obstacle": "palm", "obstacle_radius": [12, 15]}
+  ]
+}

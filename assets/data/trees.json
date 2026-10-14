@@ -1,0 +1,9 @@
+{
+  "plant_time": 2.0,
+  "stage_times": [0, 18, 40],
+  "bubble_radius": [70, 120, 180],
+  "health": [50, 110, 200],
+  "trunk_radius": [9, 15, 22],
+  "bubble_grow_rate": 25,
+  "max_trees": 60
+}

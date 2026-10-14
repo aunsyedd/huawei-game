@@ -1,0 +1,16 @@
+{
+  "weapons": [
+    {"id": "splash_pistol", "name_en": "Splash Pistol", "name_ms": "Pistol Percik",
+     "damage": 8, "fire_rate": 4.5, "range": 420, "projectile_speed": 950, "projectile_radius": 5,
+     "spread_deg": 5, "magazine": 12, "reload_time": 1.1, "splash_radius": 0, "pellets": 1,
+     "color": "#4FC3F7", "rank": 1},
+    {"id": "soaker_rifle", "name_en": "Soaker Rifle", "name_ms": "Senapang Penyiram",
+     "damage": 10, "fire_rate": 3.6, "range": 680, "projectile_speed": 1150, "projectile_radius": 5,
+     "spread_deg": 2.5, "magazine": 24, "reload_time": 2.0, "splash_radius": 0, "pellets": 1,
+     "color": "#7E57C2", "rank": 2},
+    {"id": "bubble_launcher", "name_en": "Bubble Launcher", "name_ms": "Pelancar Buih",
+     "damage": 18, "fire_rate": 0.9, "range": 540, "projectile_speed": 620, "projectile_radius": 9,
+     "spread_deg": 1.5, "magazine": 4, "reload_time": 2.4, "splash_radius": 75, "pellets": 1,
+     "color": "#FF7043", "rank": 3}
+  ]
+}
