@@ -48,3 +48,9 @@ app.*.map.json
 .widget_preview/
 .vercel
 .env*
+
+# Flutter SDK cloned by tool/vercel_build.sh
+/flutter-sdk/
+
+# Upload-ready zips from tool/package.py
+/dist/

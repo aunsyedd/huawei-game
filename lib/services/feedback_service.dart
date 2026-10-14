@@ -1,12 +1,13 @@
 import 'package:flutter/services.dart';
 
-/// Sound + haptics. Sound is a stub until OGG files are added to assets/audio
-/// (e.g. Kenney CC0 packs); haptics work now.
+import 'audio_service.dart';
+
+/// Sound effects + haptics for in-match events.
 class FeedbackService {
-  FeedbackService({this.hapticsEnabled = true, this.soundVolume = 0.8});
+  FeedbackService({this.hapticsEnabled = true, AudioService? audio}) : audio = audio ?? SilentAudioService();
 
   bool hapticsEnabled;
-  double soundVolume;
+  final AudioService audio;
   double _lastHaptic = -1;
 
   void _haptic(double now, Future<void> Function() fn) {
@@ -20,8 +21,6 @@ class FeedbackService {
   void playerTaggedOut(double now) => _haptic(now, HapticFeedback.heavyImpact);
   void treePlanted(double now) => _haptic(now, HapticFeedback.selectionClick);
 
-  // Sound hooks: wire to an audio player once assets/audio exists.
-  void shot(String weaponId) {}
-  void splash() {}
-  void pickup() {}
+  /// Plays a sound effect from assets/audio (see tool/gen_audio.py).
+  void play(String name, {double volume = 1}) => audio.sfx(name, volume: volume);
 }

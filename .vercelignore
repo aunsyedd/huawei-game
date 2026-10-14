@@ -1,6 +1,9 @@
-# Only upload the prebuilt Flutter web app (run `flutter build web --release` first).
-/*
-!/build
-/build/*
-!/build/web
-!/vercel.json
+# Vercel builds the web app from source (tool/vercel_build.sh); skip what it doesn't need.
+/android
+/build
+/test
+/.dart_tool
+/.idea
+/.claude
+/flutter-sdk
+/dist

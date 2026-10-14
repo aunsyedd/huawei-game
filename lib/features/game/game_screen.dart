@@ -17,6 +17,7 @@ import '../../game/systems/match_manager.dart';
 import '../../game/ui/drop_overlay.dart';
 import '../../game/ui/hud.dart';
 import '../../game/ui/joystick.dart';
+import '../../services/audio_service.dart';
 import '../../services/feedback_service.dart';
 import '../../state/providers.dart';
 
@@ -66,19 +67,23 @@ class _MatchState extends ConsumerState<_Match> {
     game = HazeRoyaleGame(
       config: widget.config,
       lang: settings.language,
-      feedback: FeedbackService(hapticsEnabled: settings.haptics, soundVolume: settings.soundVolume),
+      feedback: FeedbackService(hapticsEnabled: settings.haptics, audio: ref.read(audioServiceProvider)),
       aimSensitivity: settings.sensitivity,
       playerName: account?.displayName ?? (settings.language == 'ms' ? 'Anda' : 'You'),
     );
     game.onPlayerFinishedCallback = _onPlayerFinished;
     game.phase.addListener(_onPhase);
+    _audio = ref.read(audioServiceProvider)..music('music_match');
   }
+
+  late final AudioService _audio;
 
   @override
   void dispose() {
     game.phase.removeListener(_onPhase);
     _tutorialTimer?.cancel();
     _focus.dispose();
+    _audio.music('music_menu');
     super.dispose();
   }
 
@@ -104,11 +109,15 @@ class _MatchState extends ConsumerState<_Match> {
 
   Future<void> _onPlayerFinished(PlayerResult r) async {
     setState(() => _result = r);
+    _audio
+      ..music(null)
+      ..sfx(r.won ? 'win' : 'lose');
     final summary = await ref.read(profileProvider.notifier).recordMatch(r, widget.config);
     ref.read(lastMatchProvider.notifier).set(summary);
   }
 
   void _onDrop(Offset world) {
+    _audio.sfx('ui_click');
     game.startMatch(world.dx, world.dy);
     _focus.requestFocus();
   }

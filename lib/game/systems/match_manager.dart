@@ -23,6 +23,7 @@ abstract mixin class MatchListener {
   void onSplash(double x, double y) {}
   void onTagOut(Actor victim, Actor? by, String cause) {}
   void onPickup(Actor a, LootItem item) {}
+  void onReload(Actor a) {}
   void onTreePlanted(Actor a, Tree t) {}
   void onPlayerFinished(PlayerResult r) {}
   void onMatchEnd(Actor? winner) {}

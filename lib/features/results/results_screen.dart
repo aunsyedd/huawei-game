@@ -119,7 +119,10 @@ class ResultsScreen extends ConsumerWidget {
                         runSpacing: 8,
                         children: [
                           FilledButton.icon(
-                            onPressed: () => context.go('/lobby'),
+                            onPressed: () {
+                              ref.read(audioServiceProvider).sfx('ui_click');
+                              context.go('/lobby');
+                            },
                             icon: const Icon(Icons.replay),
                             label: Text(s('play_again')),
                           ),

@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/game_config.dart';
 import '../game/systems/match_manager.dart';
+import '../services/audio_service.dart';
 import '../services/hms/account_service.dart';
 import '../services/hms/game_service.dart';
 import '../services/hms/hms_services.dart';
@@ -13,6 +14,9 @@ import '../services/hms/hms_services.dart';
 /// Overridden in main().
 final sharedPrefsProvider = Provider<SharedPreferences>((ref) => throw UnimplementedError());
 final hmsServicesProvider = Provider<HmsServices>((ref) => throw UnimplementedError());
+
+/// Silent by default (tests); main() overrides it with real audio.
+final audioServiceProvider = Provider<AudioService>((ref) => SilentAudioService());
 
 final gameConfigProvider = FutureProvider<GameConfig>((ref) => GameConfig.load());
 
@@ -78,11 +82,13 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
   void setSound(double v) {
     state = state.copyWith(soundVolume: v);
+    ref.read(audioServiceProvider).setVolumes(sfx: v);
     _p.setDouble('sound', v);
   }
 
   void setMusic(double v) {
     state = state.copyWith(musicVolume: v);
+    ref.read(audioServiceProvider).setVolumes(music: v);
     _p.setDouble('music', v);
   }
 

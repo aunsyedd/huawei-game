@@ -114,7 +114,12 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
               Align(
                 alignment: Alignment.centerRight,
                 child: FilledButton.icon(
-                  onPressed: config == null ? null : () => context.go('/game'),
+                  onPressed: config == null
+                      ? null
+                      : () {
+                          ref.read(audioServiceProvider).sfx('ui_click');
+                          context.go('/game');
+                        },
                   icon: const Icon(Icons.paragliding),
                   label: Text(s('start_match')),
                 ),

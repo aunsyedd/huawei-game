@@ -36,6 +36,7 @@ class CombatSystem {
     final w = a.weapon;
     if (w == null || w.reloading || w.ammo >= w.stats.magazine) return;
     w.reloadTimer = w.stats.reloadTime;
+    sim.listener?.onReload(a);
   }
 
   void _fire(Actor a, WeaponInstance w) {

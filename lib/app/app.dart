@@ -26,9 +26,13 @@ class HazeRoyaleApp extends ConsumerWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       routerConfig: appRouter,
-      builder: (context, child) => ResponsiveShell(
-        rotateMessage: S(locale.languageCode)('rotate_device'),
-        child: child ?? const SizedBox.shrink(),
+      builder: (context, child) => Listener(
+        // Browsers only allow sound after a user gesture.
+        onPointerDown: (_) => ref.read(audioServiceProvider).unlock(),
+        child: ResponsiveShell(
+          rotateMessage: S(locale.languageCode)('rotate_device'),
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
     );
   }

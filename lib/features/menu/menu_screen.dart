@@ -31,6 +31,7 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with SingleTickerProvid
     });
     // Warm up config loading so the lobby opens instantly.
     ref.read(gameConfigProvider);
+    ref.read(audioServiceProvider).music('music_menu');
   }
 
   @override
@@ -93,7 +94,10 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with SingleTickerProvid
                           end: 1.05,
                         ).animate(CurvedAnimation(parent: _pulse, curve: Curves.easeInOut)),
                         child: FilledButton.icon(
-                          onPressed: () => context.go('/lobby'),
+                          onPressed: () {
+                            ref.read(audioServiceProvider).sfx('ui_click');
+                            context.go('/lobby');
+                          },
                           icon: const Icon(Icons.play_arrow_rounded, size: 30),
                           label: Text(s('play'), style: const TextStyle(fontSize: 22)),
                           style: FilledButton.styleFrom(

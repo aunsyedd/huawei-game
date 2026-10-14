@@ -53,7 +53,13 @@ lib/services/hms account, game_service, push, air_quality — each an abstract i
   static map cached as per-chunk `Picture`s, only visible things are drawn.
 - `MatchSimulation` must stay free of Flutter widgets/rendering so `test/` can run full headless matches.
 - Release APK under 50 MB (hard limit 100 MB): `flutter build apk --release --split-per-abi`.
-  Audio as OGG, sprites as PNG/WebP atlases.
+  Graphics are drawn in code (no image files). Audio is synthesised by `tool/gen_audio.py` into
+  assets/audio/*.wav (22 kHz mono, ~2.3 MB total); re-run it after changing a sound.
+- Rendering perf: the ground is baked per 500x500 chunk into textures (LRU) — put static ground detail in
+  `_recordChunk`, never per frame. Soft shapes (shadows, glows, smoke, splats) are pre-rendered sprites in
+  `render/sprites.dart`; visual-only effects live in `render/fx.dart` (pooled, not part of the simulation).
+- Sound: `AudioService` (lib/services/audio_service.dart). Browsers start audio only after the first tap
+  (`unlock()` is called from a root Listener). `test/audio_assets_test.dart` checks every referenced sound exists.
 - Art: Kenney CC0 top-down assets or simple shapes (currently all shapes drawn in code).
 - Mobile-responsive: size UI from `Responsive.of(context)` (lib/app/responsive.dart): `scale` from the
   short side, `compact` for ≤380 dp-high phones, `safe` insets for notches. Long screens use `CenteredScroll`.
@@ -73,7 +79,11 @@ flutter build apk --release --split-per-abi
 Desktop controls: WASD move, mouse aim, hold left button to fire, R reload, Q swap weapon, E pick up,
 1 water, 2 mask, hold F to plant.
 
+## Deploy (web demo)
+Vercel project `haze-royale` builds from source with `tool/vercel_build.sh` (clones Flutter 3.47.5, runs
+`flutter build web`), configured in `vercel.json`. `vercel deploy --prod` from the repo root, or push to the
+linked GitHub repo. Live: https://haze-royale.vercel.app
+
 ## Status / open items
 - HMS kits (Account, Game Service, Push) are wired as interfaces + fakes only; real implementations come
   after the 16–18 Oct HMS workshop (see HMS_SETUP.md).
-- No audio files yet: `AudioService` is a stub; drop Kenney OGGs into assets/audio and implement it.
