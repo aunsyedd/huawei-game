@@ -55,29 +55,20 @@ lib/services/hms account, game_service, push, air_quality — each an abstract i
 - Release APK under 50 MB (hard limit 100 MB): `flutter build apk --release --split-per-abi`.
   Graphics are drawn in code (no image files). Audio is synthesised by `tool/gen_audio.py` into
   assets/audio/*.wav (22 kHz mono, ~2.3 MB total); re-run it after changing a sound.
-- Rendering perf: the ground is baked per 500x500 chunk into textures (LRU) — put static ground detail in
-  `_recordChunk`, never per frame. Soft shapes (shadows, glows, smoke, splats) are pre-rendered sprites in
-  `render/sprites.dart`; visual-only effects live in `render/fx.dart` (pooled, not part of the simulation).
-- Sound: `AudioService` (lib/services/audio_service.dart). Browsers start audio only after the first tap
-  (`unlock()` is called from a root Listener). `test/audio_assets_test.dart` checks every referenced sound exists.
-- Art: Kenney CC0 top-down assets or simple shapes (currently all shapes drawn in code).
-- Mobile-responsive: size UI from `Responsive.of(context)` (lib/app/responsive.dart): `scale` from the
-  short side, `compact` for ≤380 dp-high phones, `safe` insets for notches. Long screens use `CenteredScroll`.
-  `test/responsive_test.dart` renders every screen (and the in-match HUD) at 640x360 → 1280x800 in EN and BM
-  and fails on any overflow — run it after UI changes.
-- View is 3D-perspective (camera tilt/distance constants at the top of PerspectiveRenderer). Anything that
-  stands up must be added to `_collect()` so it is depth-sorted; flat things go in the ground layer.
-
-## Commands
-```
-flutter pub get
-flutter test                      # unit tests + 5 headless full matches
-flutter run -d chrome             # quick desktop test (WASD + mouse also work)
-flutter run                       # on a connected Android device
-flutter build apk --release --split-per-abi
-```
-Desktop controls: WASD move, mouse aim, hold left button to fire, R reload, Q swap weapon, E pick up,
-1 water, 2 mask, hold F to plant.
+- Rendering perf: the ground is baked per 500x500 chunk into textures (all 36, prebaked during the landing
+  countdown) — put static ground detail in `_recordChunk`, never per frame. Repeated objects (palms, trees,
+  rocks, bodies, loot icons, splats, smoke, glows) come from one sprite atlas (`render/sprites.dart`) and are
+  drawn as single blits or `AtlasBatch` groups (one `drawRawAtlas` per group). No `saveLayer` in the game
+  view (the haze is one `Path.combine` shape). `HazeRoyaleGame.quality` (2→0) drops extras automatically
+  when fps stays under 48. Visual-only effects live in `render/fx.dart` (pooled, not in the simulation).
+  Grid lookups use `StaticGrid.gather` with a reused buffer (no allocation per query).
+- Sound: `AudioService` → `GameAudioService` over `services/audio/` backends: Web Audio API on web
+  (decoded buffers: ~10 ms latency, gapless loops, cross-faded music), audioplayers low-latency SoundPool on
+  Android with a serialised music player. Browsers start audio after the first tap (`unlock()` from a root
+  Listener). Music is generated on an exact sample grid in `tool/gen_audio.py`.
+  `test/audio_assets_test.dart` checks every referenced sound exists and is preloaded.
+- Native-code plugins that compile C/C++ during the build (e.g. flutter_soloud) break `flutter test` on
+  machines without Visual Studio — avoid them.
 
 ## Deploy (web demo)
 Vercel project `haze-royale` builds from source with `tool/vercel_build.sh` (clones Flutter 3.47.5, runs

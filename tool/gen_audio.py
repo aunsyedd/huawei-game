@@ -280,69 +280,77 @@ def sfx():
 
 
 # ----------------------------------------------------------------- music
+#
+# Music is laid out on an exact integer-sample grid: every note starts at
+# k * step samples, and the loop length is a whole number of steps, so the
+# drums, bass and melody stay locked together and the loop point is seamless.
 
-def loop(length, parts):
-    """Mix parts and wrap anything past the loop end back to the start."""
-    tail = 4.0
-    out = mix(length + tail, *parts)
-    n = int(length * SR)
-    out[: len(out) - n] += out[n:]
-    return out[:n]
+def place(out, sig, at, gain):
+    """Adds sig into out at sample index `at`, wrapping past the end (loop)."""
+    n = len(out)
+    sig = sig * gain
+    end = at + len(sig)
+    if end <= n:
+        out[at:end] += sig
+    else:
+        first = n - at
+        out[at:] += sig[:first]
+        rest = sig[first:]
+        while len(rest):  # wrap tails into the start of the loop
+            k = min(len(rest), n)
+            out[:k] += rest[:k]
+            rest = rest[k:]
 
 
 def music_menu():
-    bpm = 76
-    beat = 60 / bpm
+    beat = 17408                     # samples per beat (~76 bpm at 22.05 kHz)
     bars = 8
-    length = bars * 4 * beat
+    out = np.zeros(bars * 4 * beat)
+    b_s = beat / SR
     # Slendro-like pentatonic around C.
     scale = ['C5', 'D5', 'F5', 'G5', 'A5', 'C6', 'D6']
     melody = [0, 2, 3, 4, 3, 2, 0, -1,  2, 3, 4, 6, 5, 4, 3, -1,
               4, 5, 4, 3, 2, 3, 2, 0,  1, 2, 3, 2, 1, 0, -1, -1]
-    parts = []
     for i, m in enumerate(melody):
         if m < 0:
             continue
-        parts.append((bell(note(scale[m]), beat * 2.2, 0.9), i * beat, 0.55))
-        # Higher octave echo (kotekan-style interlock), quieter.
-        parts.append((bell(note(scale[m]) * 2, beat * 1.2, 0.6), i * beat + beat / 2, 0.14))
+        place(out, bell(note(scale[m]), b_s * 1.8, 0.9), i * beat, 0.55)
+        place(out, bell(note(scale[m]) * 2, b_s * 1.0, 0.5), i * beat, 0.10)  # octave shimmer, same time
     for b in range(bars):
-        parts.append((gong(65.4 if b % 2 == 0 else 73.4, beat * 4), b * 4 * beat, 0.5))
-    # Warm drone pad.
-    t = secs(length)
-    pad = (np.sin(2 * np.pi * note('C3') * t) + 0.6 * np.sin(2 * np.pi * note('G3') * t)) * (0.6 + 0.4 * np.sin(2 * np.pi * t / length * 2))
-    parts.append((pad, 0, 0.12))
-    write('music_menu', loop(length, parts), 0.7, fade=False)
+        place(out, gong(65.4 if b % 2 == 0 else 73.4, b_s * 4), b * 4 * beat, 0.5)
+    t = np.arange(len(out)) / SR
+    length = len(out) / SR
+    pad = (np.sin(2 * np.pi * note('C3') * t) + 0.6 * np.sin(2 * np.pi * note('G3') * t)) * (
+        0.6 + 0.4 * np.sin(2 * np.pi * t / length * 2))
+    out += pad * 0.12
+    write('music_menu', out, 0.7, fade=False)
 
 
 def music_match():
-    bpm = 118
-    beat = 60 / bpm
-    step = beat / 4
+    step = 2756                      # samples per 16th note (120 bpm at 22.05 kHz)
     bars = 8
-    length = bars * 4 * beat
-    parts = []
+    out = np.zeros(bars * 16 * step)
+    st = step / SR
     # Kompang pattern (16 steps per bar).
     dum = {0: 1.0, 6: 0.8, 8: 0.9, 11: 0.7}
-    tak = {4: 1.0, 12: 1.0, 14: 0.6, 2: 0.35, 10: 0.35}
+    tak = {4: 1.0, 12: 1.0, 14: 0.6}
     for b in range(bars):
-        for s in range(16):
-            at = (b * 16 + s) * step
-            if s in dum:
-                parts.append((drum_dum(), at, 0.55 * dum[s]))
-            if s in tak:
-                parts.append((drum_tak(), at, 0.45 * tak[s]))
-            if s % 2 == 1:
-                parts.append((shaker(), at, 0.12))
+        for s16 in range(16):
+            at = (b * 16 + s16) * step
+            if s16 in dum:
+                place(out, drum_dum(), at, 0.55 * dum[s16])
+            if s16 in tak:
+                place(out, drum_tak(), at, 0.45 * tak[s16])
+            if s16 % 2 == 1:
+                place(out, shaker(), at, 0.10)
     # Bass line (A minor pentatonic), eighth notes.
     roots = ['A2', 'A2', 'C3', 'G2', 'A2', 'A2', 'D3', 'E3']
     for b, r in enumerate(roots):
         f = note(r)
         for e in range(8):
             ff = f * (2 if e in (3, 7) else 1)
-            v = pluck(ff, step * 2.2, 0.35)
-            parts.append((v, b * 4 * beat + e * 2 * step, 0.5 if e % 2 == 0 else 0.35))
-    # Plucked lead melody.
+            place(out, pluck(ff, st * 2.2, 0.35), (b * 16 + e * 2) * step, 0.5 if e % 2 == 0 else 0.35)
+    # Plucked lead melody, eighth notes.
     scale = ['A4', 'C5', 'D5', 'E5', 'G5', 'A5', 'C6']
     phrase_a = [5, -1, 4, 3, 4, -1, 3, 1, 2, -1, 1, 0, 1, -1, -1, -1]
     phrase_b = [3, 4, 5, -1, 6, 5, 4, -1, 3, 4, 3, 1, 0, -1, -1, -1]
@@ -350,10 +358,8 @@ def music_match():
     for i, m in enumerate(lead):
         if m < 0:
             continue
-        at = i * 2 * step  # eighth notes over 8 bars
-        parts.append((pluck(note(scale[m]), 0.45, 0.65), at, 0.32))
-        parts.append((pluck(note(scale[m]) * 1.005, 0.4, 0.5), at + 0.012, 0.12))  # slight chorus
-    write('music_match', loop(length, parts), 0.72, fade=False)
+        place(out, pluck(note(scale[m]), st * 3.2, 0.65), i * 2 * step, 0.36)
+    write('music_match', out, 0.72, fade=False)
 
 
 if __name__ == '__main__':

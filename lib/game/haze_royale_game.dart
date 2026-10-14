@@ -69,7 +69,7 @@ class HazeRoyaleGame extends Game with MatchListener {
   /// draw per chunk per frame instead of replaying thousands of shapes.
   final Map<int, Image> _chunkImages = {};
   final List<int> _chunkLru = [];
-  static const int _maxChunkImages = 18;
+  static const int _maxChunkImages = 36; // the whole island
   static const double _chunkPad = 4;
   final Paint _chunkPaint = Paint()..filterQuality = FilterQuality.medium;
   int _bakedThisFrame = 0;
@@ -78,6 +78,11 @@ class HazeRoyaleGame extends Game with MatchListener {
   late final List<double> _stepTimers;
 
   bool _wasShrinking = false;
+
+  /// 2 = full detail, 1 = reduced, 0 = minimal. Drops automatically when the
+  /// device can't keep up (never goes back up within a match, to avoid flicker).
+  int quality = 2;
+  double _slowTime = 0;
 
   /// Last time each actor fired (muzzle flash).
   late final List<double> lastShot;
@@ -109,6 +114,7 @@ class HazeRoyaleGame extends Game with MatchListener {
   void update(double dt) {
     if (dt <= 0) return;
     fps = fps * 0.95 + (1 / dt) * 0.05;
+    _adaptQuality(dt);
     dt = math.min(dt, 0.05);
     clock += dt;
 
@@ -139,7 +145,8 @@ class HazeRoyaleGame extends Game with MatchListener {
     if (shrinking && !_wasShrinking && sim.phase == MatchPhase.running) feedback.play('haze_warning', volume: 0.8);
     _wasShrinking = shrinking;
 
-    _footsteps(dt);
+    if (quality >= 2) _footsteps(dt);
+    if (sim.phase == MatchPhase.dropping) _prebakeNextChunk();
     fx.update(dt);
     _updateParticles(dt);
 
@@ -151,6 +158,36 @@ class HazeRoyaleGame extends Game with MatchListener {
   }
 
   bool _nearCamera(double x, double y) => (x - camX).abs() < 900 && (y - camY).abs() < 700;
+
+  void _adaptQuality(double dt) {
+    if (sim.phase != MatchPhase.running || dt > 0.25 || quality == 0) return;
+    if (fps < 48) {
+      _slowTime += dt;
+    } else {
+      _slowTime = math.max(0, _slowTime - dt * 0.5);
+    }
+    if (_slowTime > 3) {
+      quality--;
+      _slowTime = 0;
+    }
+  }
+
+  /// Bakes ground textures while the landing map is up, so the match never
+  /// stutters when walking into a new area.
+  void _prebakeNextChunk() {
+    if (viewW == 0) return;
+    final cols = (sim.map.width / _chunkSize).ceil();
+    final rows = (sim.map.height / _chunkSize).ceil();
+    for (var cy = 0; cy < rows; cy++) {
+      for (var cx = 0; cx < cols; cx++) {
+        final key = cy * 1000 + cx;
+        if (_chunkImages.containsKey(key)) continue;
+        _bakedThisFrame = 0;
+        _chunkImage(key, cx, cy);
+        return;
+      }
+    }
+  }
 
   void _footsteps(double dt) {
     if (sim.phase != MatchPhase.running) return;
@@ -369,7 +406,7 @@ class HazeRoyaleGame extends Game with MatchListener {
     _bakedThisFrame++;
     final pic = _chunks.remove(key) ?? _recordChunk(cx, cy);
     // About one texel per screen pixel near the camera.
-    final texScale = (zoom * 1.3).clamp(0.5, 1.0);
+    final texScale = (zoom * 1.3).clamp(0.5, 0.85);
     final size = ((_chunkSize + _chunkPad * 2) * texScale).ceil();
     final rec = PictureRecorder();
     final c = Canvas(rec)

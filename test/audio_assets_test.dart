@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:haze_royale/services/audio_service.dart';
 
 /// Every sound the code asks for must exist in assets/audio, and every file
 /// there should be used (catches typos that would silently play nothing).
@@ -41,5 +42,9 @@ void main() {
     expect(missing, isEmpty, reason: 'sounds referenced in code but missing from assets/audio');
     final unused = files.difference(referenced);
     expect(unused, isEmpty, reason: 'sound files nobody plays');
+    // Everything played must also be preloaded by the audio engine.
+    final loaded = {...GameAudioService.effects, ...GameAudioService.tracks};
+    expect(referenced.difference(loaded), isEmpty, reason: 'played but never loaded');
+    expect(loaded.difference(files), isEmpty, reason: 'loaded but no file');
   });
 }

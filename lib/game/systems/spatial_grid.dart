@@ -62,14 +62,17 @@ class StaticGrid {
     }
   }
 
-  /// Cells overlapping the box; indices may repeat across cells.
-  Iterable<int> queryBox(double l, double t, double r, double b) sync* {
+  /// Collects indices in cells overlapping the box into [out] (cleared
+  /// first; indices may repeat). Reusing [out] keeps this allocation-free.
+  List<int> gather(double l, double t, double r, double b, List<int> out) {
+    out.clear();
     final x0 = cx(math.min(l, r)), x1 = cx(math.max(l, r));
     final y0 = cy(math.min(t, b)), y1 = cy(math.max(t, b));
     for (var y = y0; y <= y1; y++) {
       for (var x = x0; x <= x1; x++) {
-        yield* cells[y * cols + x];
+        out.addAll(cells[y * cols + x]);
       }
     }
+    return out;
   }
 }

@@ -20,7 +20,7 @@ Future<void> main() async {
   final hms = await HmsDetector().isHmsAvailable();
   final services = HmsServices.create(hmsAvailable: hms, prefs: prefs);
   services.push.init();
-  final audio = FlameAudioService(
+  final audio = GameAudioService(
     sfxVolume: prefs.getDouble('sound') ?? 0.8,
     musicVolume: prefs.getDouble('music') ?? 0.5,
   );

@@ -32,6 +32,9 @@ class MapLayout {
   late final StaticGrid wallGrid;
   late final StaticGrid obstacleGrid;
 
+  /// Scratch list for grid queries (avoids allocating per lookup).
+  final List<int> _buf = [];
+
   double get width => config.width;
   double get height => config.height;
 
@@ -248,13 +251,13 @@ class MapLayout {
   /// True when a circle at (x, y) overlaps no wall or obstacle.
   bool isFree(double x, double y, double r) {
     if (x < r || y < r || x > width - r || y > height - r) return false;
-    for (final i in wallGrid.queryBox(x - r, y - r, x + r, y + r)) {
+    for (final i in wallGrid.gather(x - r, y - r, x + r, y + r, _buf)) {
       final w = walls[i];
       final nx = x.clamp(w.left, w.right), ny = y.clamp(w.top, w.bottom);
       final dx = x - nx, dy = y - ny;
       if (dx * dx + dy * dy < r * r) return false;
     }
-    for (final i in obstacleGrid.queryBox(x - r, y - r, x + r, y + r)) {
+    for (final i in obstacleGrid.gather(x - r, y - r, x + r, y + r, _buf)) {
       final o = obstacles[i];
       final dx = x - o.x, dy = y - o.y, m = r + o.r;
       if (dx * dx + dy * dy < m * m) return false;
@@ -277,7 +280,7 @@ class MapLayout {
   /// Pushes the circle at ([pos]) out of walls, obstacles and map edges.
   /// Writes the result into [out] as (x, y).
   void resolveCircle(double x, double y, double r, List<double> out) {
-    for (final i in wallGrid.queryBox(x - r, y - r, x + r, y + r)) {
+    for (final i in wallGrid.gather(x - r, y - r, x + r, y + r, _buf)) {
       final w = walls[i];
       final nx = x.clamp(w.left, w.right), ny = y.clamp(w.top, w.bottom);
       var dx = x - nx, dy = y - ny;
@@ -302,7 +305,7 @@ class MapLayout {
       x += dx / d * (r - d);
       y += dy / d * (r - d);
     }
-    for (final i in obstacleGrid.queryBox(x - r, y - r, x + r, y + r)) {
+    for (final i in obstacleGrid.gather(x - r, y - r, x + r, y + r, _buf)) {
       final o = obstacles[i];
       final dx = x - o.x, dy = y - o.y, m = r + o.r;
       final d2 = dx * dx + dy * dy;
@@ -337,7 +340,7 @@ class MapLayout {
   /// Line of sight: false if a wall blocks the segment. Obstacles are ignored
   /// (you can see past a palm, you just might hit it).
   bool lineOfSight(double x0, double y0, double x1, double y1) {
-    for (final i in wallGrid.queryBox(x0, y0, x1, y1)) {
+    for (final i in wallGrid.gather(x0, y0, x1, y1, _buf)) {
       if (_segmentHitsRect(x0, y0, x1, y1, walls[i])) return false;
     }
     return true;
