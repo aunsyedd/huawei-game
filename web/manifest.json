@@ -1,12 +1,12 @@
 {
-    "name": "haze_royale",
-    "short_name": "haze_royale",
+    "name": "Haze Royale",
+    "short_name": "Haze Royale",
     "start_url": ".",
-    "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "display": "fullscreen",
+    "background_color": "#0D1B2A",
+    "theme_color": "#0D1B2A",
+    "description": "Non-violent battle royale: survive the haze, plant trees.",
+    "orientation": "landscape",
     "prefer_related_applications": false,
     "icons": [
         {
