@@ -1,0 +1,68 @@
+{
+  "size": 32,
+  "max_height": 7,
+  "reach": 2.1,
+  "place_cooldown": 0.18,
+  "mine_speed": 1.6,
+  "start_blocks": {"royale": {}, "craft": {"plank": 64, "stone": 48, "glass": 24, "lamp": 12}},
+  "start_seeds": {"royale": 0, "craft": 8},
+  "types": [
+    {"id": "grass", "name_en": "Grass Block", "name_ms": "Blok Rumput", "top": "76BE4B", "side": "8C6239",
+     "hardness": 0.5, "drop": "dirt", "rim": true},
+    {"id": "dirt", "name_en": "Dirt", "name_ms": "Tanah", "top": "9A6F45", "side": "85603C", "hardness": 0.5},
+    {"id": "sand", "name_en": "Sand", "name_ms": "Pasir", "top": "EADBA4", "side": "DCCB8E", "hardness": 0.45},
+    {"id": "stone", "name_en": "Stone", "name_ms": "Batu", "top": "969FA4", "side": "868F94", "hardness": 1.4,
+     "drop": "cobble"},
+    {"id": "cobble", "name_en": "Cobblestone", "name_ms": "Batu Bulat", "top": "7E8689", "side": "757D80",
+     "hardness": 1.2, "grain": 0.1},
+    {"id": "log", "name_en": "Wood Log", "name_ms": "Kayu Balak", "top": "B08D5B", "side": "6D4C41", "hardness": 0.9},
+    {"id": "plank", "name_en": "Planks", "name_ms": "Papan", "top": "BC8D52", "side": "AE8149", "hardness": 0.7},
+    {"id": "leaves", "name_en": "Leaves", "name_ms": "Daun", "top": "57B65A", "side": "46A049", "hardness": 0.25,
+     "grain": 0.12},
+    {"id": "bamboo", "name_en": "Bamboo", "name_ms": "Buluh", "top": "AED581", "side": "8CB355", "hardness": 0.35},
+    {"id": "glass", "name_en": "Glass", "name_ms": "Kaca", "top": "A8DCF2", "side": "9FD3EE", "hardness": 0.3,
+     "alpha": 0.52, "shine": 0.9},
+    {"id": "brick", "name_en": "Clay Brick", "name_ms": "Bata Tanah", "top": "BC6049", "side": "A94F3C",
+     "hardness": 1.1, "grain": 0.09},
+    {"id": "filter", "name_en": "Air Filter Block", "name_ms": "Blok Penapis Udara", "top": "80DEEA",
+     "side": "26A69A", "hardness": 0.9, "bubble": 85, "glow": 0.25, "shine": 0.4},
+    {"id": "lamp", "name_en": "Lantern Block", "name_ms": "Blok Tanglung", "top": "FFE082", "side": "FFB300",
+     "hardness": 0.5, "glow": 1.0, "shine": 0.3}
+  ],
+  "recipes": [
+    {"out": "plank", "count": 4, "in": {"log": 1}},
+    {"out": "cobble", "count": 1, "in": {"stone": 1}},
+    {"out": "glass", "count": 2, "in": {"sand": 3}},
+    {"out": "brick", "count": 2, "in": {"dirt": 2, "sand": 1}},
+    {"out": "lamp", "count": 1, "in": {"glass": 1, "bamboo": 2}},
+    {"out": "filter", "count": 1, "in": {"leaves": 4, "plank": 2}},
+    {"out": "seed", "count": 1, "item": true, "name_en": "Seed Pack", "name_ms": "Paket Benih",
+     "in": {"leaves": 3, "dirt": 2}},
+    {"out": "water", "count": 1, "item": true, "name_en": "Water Bottle", "name_ms": "Botol Air",
+     "in": {"glass": 1, "leaves": 2}}
+  ],
+  "nodes": {
+    "royale": [
+      {"area": "forest", "block": "log", "clusters": 16, "size": [2, 4], "stack": [1, 3]},
+      {"area": "forest", "block": "bamboo", "clusters": 10, "size": [2, 5], "stack": [1, 2]},
+      {"area": "plantation", "block": "log", "clusters": 10, "size": [2, 4], "stack": [1, 2]},
+      {"area": "kampung", "block": "dirt", "clusters": 10, "size": [2, 5], "stack": [1, 2]},
+      {"area": "kampung", "block": "bamboo", "clusters": 8, "size": [2, 4], "stack": [1, 2]},
+      {"area": "town", "block": "stone", "clusters": 14, "size": [2, 5], "stack": [1, 3]},
+      {"area": "town", "block": "brick", "clusters": 6, "size": [2, 3], "stack": [1, 2]},
+      {"area": "beach", "block": "sand", "clusters": 16, "size": [3, 6], "stack": [1, 2]}
+    ],
+    "craft": [
+      {"area": "forest", "block": "log", "clusters": 46, "size": [3, 6], "stack": [2, 4]},
+      {"area": "forest", "block": "bamboo", "clusters": 30, "size": [3, 6], "stack": [1, 3]},
+      {"area": "forest", "block": "stone", "clusters": 14, "size": [2, 5], "stack": [1, 3]},
+      {"area": "plantation", "block": "log", "clusters": 34, "size": [3, 6], "stack": [2, 3]},
+      {"area": "plantation", "block": "dirt", "clusters": 18, "size": [3, 6], "stack": [1, 2]},
+      {"area": "kampung", "block": "dirt", "clusters": 30, "size": [3, 6], "stack": [1, 3]},
+      {"area": "kampung", "block": "bamboo", "clusters": 24, "size": [3, 5], "stack": [1, 3]},
+      {"area": "town", "block": "stone", "clusters": 40, "size": [3, 6], "stack": [2, 4]},
+      {"area": "town", "block": "brick", "clusters": 20, "size": [2, 5], "stack": [1, 3]},
+      {"area": "beach", "block": "sand", "clusters": 44, "size": [4, 8], "stack": [1, 3]}
+    ]
+  }
+}

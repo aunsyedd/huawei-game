@@ -28,7 +28,7 @@ Future<ProviderContainer> pumpApp(WidgetTester tester, Size size, String route, 
   tester.view.padding = const FakeViewPadding(left: 32);
   addTearDown(tester.view.reset);
 
-  SharedPreferences.setMockInitialValues({'language': lang, 'tutorial_done': true});
+  SharedPreferences.setMockInitialValues({'language': lang, 'tutorial_done': true, 'story_seen': true});
   final prefs = await SharedPreferences.getInstance();
   final config = loadConfig();
   final container = ProviderContainer(
@@ -57,12 +57,12 @@ Future<ProviderContainer> pumpApp(WidgetTester tester, Size size, String route, 
 }
 
 void main() {
-  for (final route in ['/', '/lobby', '/results', '/leaderboard', '/settings', '/game']) {
+  for (final route in ['/', '/lobby', '/results', '/leaderboard', '/settings', '/story', '/guide', '/game', '/craft']) {
     for (final e in sizes.entries) {
       for (final lang in ['en', 'ms']) {
         testWidgets('$route fits on ${e.key} ($lang)', (tester) async {
           await pumpApp(tester, e.value, route, lang: lang);
-          if (route == '/game') {
+          if (route == '/game' || route == '/craft') {
             // Land, then let the HUD, sticks and action buttons lay out mid-match.
             await tester.tap(find.byIcon(Icons.paragliding));
             for (var i = 0; i < 20; i++) {
@@ -89,7 +89,7 @@ void main() {
   test('router has every screen', () {
     expect(
       appRouter.configuration.routes.whereType<GoRoute>().map((r) => r.path),
-      containsAll(['/', '/lobby', '/game', '/results', '/leaderboard', '/settings']),
+      containsAll(['/', '/lobby', '/game', '/craft', '/results', '/leaderboard', '/settings', '/story', '/guide']),
     );
   });
 }

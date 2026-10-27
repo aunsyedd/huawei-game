@@ -82,9 +82,23 @@ class CombatSystem {
           _impact(p, hitWall: true);
           break;
         }
+        if (_hitBlock(p)) break;
         if (_hitActor(p) || _hitTree(p)) break;
       }
     }
+  }
+
+  /// Blocks are cover you can shoot away.
+  bool _hitBlock(Projectile p) {
+    final blocks = sim.blocks;
+    final bx = blocks.gx(p.x), by = blocks.gy(p.y);
+    if (blocks.height(bx, by) == 0) return false;
+    if (p.weapon.splashRadius <= 0) {
+      final broke = blocks.damageColumn(bx, by, p.weapon.damage);
+      if (broke >= 0) sim.listener?.onBlockBroken(blocks.wx(bx), blocks.wy(by), broke);
+    }
+    _impact(p, hitWall: true);
+    return true;
   }
 
   bool _hitActor(Projectile p) {
@@ -147,13 +161,26 @@ class CombatSystem {
       final d = math.sqrt(dx * dx + dy * dy) - Actor.radius;
       if (d > radius) continue;
       final falloff = 1 - 0.5 * (d.clamp(0, radius) / radius);
-      if (!sim.map.lineOfSight(x, y, a.pos.x, a.pos.y)) continue;
+      if (!sim.visible(x, y, a.pos.x, a.pos.y)) continue;
       damage(a, dmg * falloff, source: owner, cause: cause);
     }
     for (final t in sim.trees) {
       if (!t.alive) continue;
       final dx = t.x - x, dy = t.y - y;
       if (dx * dx + dy * dy < radius * radius) damageTree(t, dmg * 0.6);
+    }
+    // Splash chews through a patch of blocks.
+    final blocks = sim.blocks;
+    final x0 = blocks.gx(x - radius), x1 = blocks.gx(x + radius);
+    final y0 = blocks.gy(y - radius), y1 = blocks.gy(y + radius);
+    for (var by = y0; by <= y1; by++) {
+      for (var bx = x0; bx <= x1; bx++) {
+        if (blocks.height(bx, by) == 0) continue;
+        final dx = blocks.wx(bx) - x, dy = blocks.wy(by) - y;
+        if (dx * dx + dy * dy > radius * radius) continue;
+        final broke = blocks.damageColumn(bx, by, dmg * 0.8);
+        if (broke >= 0) sim.listener?.onBlockBroken(blocks.wx(bx), blocks.wy(by), broke);
+      }
     }
   }
 

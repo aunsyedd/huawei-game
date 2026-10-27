@@ -41,7 +41,7 @@ class BotAi {
       if (identical(o, a) || !o.alive) continue;
       final d2 = a.pos.distanceToSquared(o.pos);
       if (d2 >= best) continue;
-      if (!sim.map.lineOfSight(a.pos.x, a.pos.y, o.pos.x, o.pos.y)) continue;
+      if (!sim.visible(a.pos.x, a.pos.y, o.pos.x, o.pos.y)) continue;
       if (_hiddenByRoof(a, o)) continue;
       best = d2;
       enemy = o;
@@ -56,7 +56,7 @@ class BotAi {
         b.target = enemy;
         b.acquiredAt = sim.time;
       }
-      b.targetVisible = sim.map.lineOfSight(a.pos.x, a.pos.y, enemy.pos.x, enemy.pos.y);
+      b.targetVisible = sim.visible(a.pos.x, a.pos.y, enemy.pos.x, enemy.pos.y);
       b.lastEnemySeen = sim.time;
     } else {
       b.targetVisible = false;
@@ -84,6 +84,17 @@ class BotAi {
     if (inHaze && a.masks > 0 && a.hazeShield <= 0 && enemyDist > 380) {
       sim.startAction(a, ActorAction.masking);
       return;
+    }
+
+    // Hurt and under fire: drop a block of cover between us and them.
+    if (enemy != null &&
+        lowHp &&
+        b.targetVisible &&
+        a.placeCooldown <= 0 &&
+        a.carried(a.selected) > 0 &&
+        sim.rng.nextDouble() < 0.45) {
+      a.aimAngle = math.atan2(enemy.pos.y - a.pos.y, enemy.pos.x - a.pos.x);
+      sim.placeBlock(a);
     }
 
     if (enemy != null && lowHp && a.water > 0) {
@@ -158,7 +169,7 @@ class BotAi {
       final ang = base + (sim.rng.nextDouble() - 0.5) * 1.2;
       final d = r * (0.35 + sim.rng.nextDouble() * 0.45);
       final x = cx + math.cos(ang) * d, y = cy + math.sin(ang) * d;
-      if (sim.map.isFree(x, y, Actor.radius)) {
+      if (sim.free(x, y, Actor.radius)) {
         b.dest.setValues(x, y);
         b.hasDest = true;
         return;
@@ -175,7 +186,7 @@ class BotAi {
       final d = 250 + sim.rng.nextDouble() * 550;
       final x = a.pos.x + math.cos(ang) * d, y = a.pos.y + math.sin(ang) * d;
       final ok = z.finished ? z.isSafe(x, y) : z.isSafeNext(x, y, margin: 100);
-      if (ok && sim.map.isFree(x, y, Actor.radius)) {
+      if (ok && sim.free(x, y, Actor.radius)) {
         b.dest.setValues(x, y);
         b.hasDest = true;
         return;
@@ -270,15 +281,54 @@ class BotAi {
         b.unstuckTimer = 0.5 + sim.rng.nextDouble() * 0.6;
         b.unstuckAngle = sim.rng.nextDouble() * math.pi * 2;
         b.avoidSide = -b.avoidSide;
-        if (b.stuckSeconds > 2) {
+        if (b.stuckSeconds > 1) {
           b.hasDest = false;
           b.lootTarget = null;
+          _recover(a, b);
         }
       } else {
         b.stuckSeconds = 0;
       }
       b.lastCheckPos.setFrom(a.pos);
       b.stuckCheck = 1;
+    }
+  }
+
+  /// Wedged in. First walk out along a direction that is genuinely clear
+  /// (a random angle rarely escapes a corner), and if nothing is clear, chew
+  /// through whatever block is in the way -- bots dig out of anything a
+  /// player builds around them.
+  void _recover(Actor a, BotBrain b) {
+    if (a.busy) return;
+    // Walk out in small steps along each direction: a single long probe can
+    // jump straight over a thin wall and send the bot back into it.
+    const step = 13.0, maxReach = 130.0;
+    var bestAngle = b.unstuckAngle;
+    var bestClear = 0.0;
+    for (var i = 0; i < 24; i++) {
+      final ang = i / 24 * math.pi * 2;
+      final dx = math.cos(ang), dy = math.sin(ang);
+      var clear = 0.0;
+      for (var d = step; d <= maxReach; d += step) {
+        if (!sim.free(a.pos.x + dx * d, a.pos.y + dy * d, Actor.radius - 1)) break;
+        clear = d;
+      }
+      if (clear > bestClear) {
+        bestClear = clear;
+        bestAngle = ang;
+      }
+    }
+    if (bestClear >= step * 2) {
+      b.unstuckAngle = bestAngle;
+      b.unstuckTimer = 0.9 + sim.rng.nextDouble() * 0.5;
+      return;
+    }
+    for (var i = 0; i < 16; i++) {
+      final old = a.aimAngle;
+      a.aimAngle = i / 16 * math.pi * 2;
+      final (bx, by) = sim.targetColumn(a);
+      if (sim.blocks.height(bx, by) > 0 && sim.startMining(a)) return;
+      a.aimAngle = old;
     }
   }
 
@@ -304,7 +354,7 @@ class BotAi {
   /// Rotates the steering direction away from walls/obstacles just ahead.
   (double, double) _avoid(Actor a, BotBrain b, double mx, double my) {
     const probe = 40.0;
-    if (sim.map.isFree(a.pos.x + mx * probe, a.pos.y + my * probe, Actor.radius - 2)) {
+    if (sim.free(a.pos.x + mx * probe, a.pos.y + my * probe, Actor.radius - 2)) {
       return (mx, my);
     }
     for (final deg in const [35, 70, 105]) {
@@ -312,7 +362,7 @@ class BotAi {
         final ang = deg * math.pi / 180 * side;
         final c = math.cos(ang), s = math.sin(ang);
         final rx = mx * c - my * s, ry = mx * s + my * c;
-        if (sim.map.isFree(a.pos.x + rx * probe, a.pos.y + ry * probe, Actor.radius - 2)) {
+        if (sim.free(a.pos.x + rx * probe, a.pos.y + ry * probe, Actor.radius - 2)) {
           b.avoidSide = side;
           return (rx, ry);
         }

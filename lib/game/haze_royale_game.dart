@@ -9,6 +9,7 @@ import '../services/feedback_service.dart';
 import 'components/actor.dart';
 import 'components/loot.dart';
 import 'components/tree.dart';
+import 'render/camera3d.dart';
 import 'render/fx.dart';
 import 'render/perspective_renderer.dart';
 import 'systems/match_manager.dart';
@@ -21,9 +22,18 @@ class HazeRoyaleGame extends Game with MatchListener {
     required this.lang,
     required this.feedback,
     this.aimSensitivity = 1,
+    this.playerSkin = 0,
+    this.graphics = 3,
+    this.cameraFollow = true,
+    double cameraTilt = Camera3D.defaultTilt,
     String playerName = 'You',
+    GameMode mode = GameMode.royale,
     int? seed,
-  }) : sim = MatchSimulation(config, seed: seed, playerName: playerName) {
+  }) : sim = MatchSimulation(config, seed: seed, playerName: playerName, mode: mode),
+       quality = graphics.clamp(0, 3),
+       camTilt = cameraTilt.clamp(Camera3D.minTilt, Camera3D.maxTilt),
+       camTiltSetting = cameraTilt.clamp(Camera3D.minTilt, Camera3D.maxTilt),
+       _tiltGoal = cameraTilt.clamp(Camera3D.minTilt, Camera3D.maxTilt) {
     sim.listener = this;
     camX = sim.map.width / 2;
     camY = sim.map.height / 2;
@@ -41,10 +51,26 @@ class HazeRoyaleGame extends Game with MatchListener {
   final MatchSimulation sim;
   double aimSensitivity;
 
+  /// Graphics preset picked in settings: 3 = ultra ... 0 = minimal.
+  final int graphics;
+
+  /// Whether the camera swings behind the player as they move.
+  bool cameraFollow;
+
+  GameMode get mode => sim.mode;
+
+  /// Index into progression.json skins (the player's chosen colour).
+  final int playerSkin;
+
   // ---- Input written by the Flutter overlays ----
   final Vector2 moveInput = Vector2.zero();
   final Vector2 aimInput = Vector2.zero();
   bool fireHeld = false;
+
+  /// Building: hold to mine, and whether the HUD shows the targeting box.
+  bool mineHeld = false;
+  bool buildMode = false;
+  bool showBlockTarget = true;
 
   // ---- Notifications to the HUD ----
   final ValueNotifier<int> hudTick = ValueNotifier(0);
@@ -55,6 +81,21 @@ class HazeRoyaleGame extends Game with MatchListener {
 
   // ---- Camera ----
   double viewW = 0, viewH = 0, zoom = 1, camX = 0, camY = 0;
+
+  /// Heading (0 = looking north) and tilt from straight down. Both ease
+  /// towards their goals so turning the camera never snaps.
+  double camYaw = 0, camTilt = Camera3D.defaultTilt;
+  double _yawGoal = 0, _tiltGoal = Camera3D.defaultTilt;
+
+  /// The tilt chosen in settings; manual tilting starts from it.
+  double camTiltSetting = Camera3D.defaultTilt;
+
+  /// While positive, the player's own camera drag wins over follow.
+  double _manualCam = 0;
+
+  /// 0..1 over a day; 0.5 is noon.
+  double timeOfDay = 0.40;
+
   double _shake = 0, _shakeTime = 0;
   final _rng = math.Random();
   double _hudAccum = 0;
@@ -79,9 +120,10 @@ class HazeRoyaleGame extends Game with MatchListener {
 
   bool _wasShrinking = false;
 
-  /// 2 = full detail, 1 = reduced, 0 = minimal. Drops automatically when the
-  /// device can't keep up (never goes back up within a match, to avoid flicker).
-  int quality = 2;
+  /// 3 = ultra (voxel texture detail, cast shadows, sea glitter), 2 = high,
+  /// 1 = reduced, 0 = minimal. Drops automatically when the device cannot keep
+  /// up (never goes back up within a match, to avoid flicker).
+  int quality;
   double _slowTime = 0;
 
   /// Last time each actor fired (muzzle flash).
@@ -108,6 +150,34 @@ class HazeRoyaleGame extends Game with MatchListener {
     phase.value = MatchPhase.running;
   }
 
+  // ------------------------------------------------------------------ blocks
+
+  /// Puts the selected block down in front of the player.
+  bool placeBlock() {
+    final ok = sim.placeBlock(sim.player);
+    if (!ok) feedback.play('ui_click', volume: 0.25);
+    return ok;
+  }
+
+  void selectBlock(int type) {
+    sim.player.selected = type;
+    feedback.play('ui_click', volume: 0.4);
+  }
+
+  /// Cycles through the blocks the player is carrying (keyboard).
+  void cycleBlock(int delta) {
+    final bar = sim.hotbar(sim.player);
+    if (bar.isEmpty) return;
+    final i = bar.indexOf(sim.player.selected);
+    selectBlock(bar[(i + delta + bar.length) % bar.length]);
+  }
+
+  bool craft(int recipeIndex) {
+    final ok = sim.craft(sim.player, recipeIndex);
+    feedback.play(ok ? 'pickup' : 'ui_click', volume: ok ? 0.8 : 0.25);
+    return ok;
+  }
+
   // ------------------------------------------------------------------ update
 
   @override
@@ -120,13 +190,17 @@ class HazeRoyaleGame extends Game with MatchListener {
 
     final p = sim.player;
     if (p.alive && p.brain == null && sim.phase == MatchPhase.running) {
-      p.moveInput.setFrom(moveInput);
+      // Sticks are read relative to where the camera looks, so turning the
+      // camera never inverts the controls.
+      final cs = math.cos(camYaw), sn = math.sin(camYaw);
+      p.moveInput.setValues(moveInput.x * cs - moveInput.y * sn, moveInput.x * sn + moveInput.y * cs);
       if (aimInput.length2 > 0.0025) {
-        p.aimAngle = math.atan2(aimInput.y, aimInput.x);
+        p.aimAngle = math.atan2(aimInput.x * sn + aimInput.y * cs, aimInput.x * cs - aimInput.y * sn);
       } else if (moveInput.length2 > 0.01) {
-        p.aimAngle = math.atan2(moveInput.y, moveInput.x);
+        p.aimAngle = math.atan2(p.moveInput.y, p.moveInput.x);
       }
-      p.wantFire = fireHeld;
+      p.wantFire = fireHeld && !buildMode;
+      p.wantMine = mineHeld;
     }
     sim.update(dt);
     if (sim.phase == MatchPhase.ended) sim.effects.update(dt);
@@ -138,6 +212,8 @@ class HazeRoyaleGame extends Game with MatchListener {
       camX += (f.x - camX) * k;
       camY += (f.y - camY) * k;
     }
+    _updateCamera(dt);
+    _updateSky(dt);
     if (_shakeTime > 0) _shakeTime -= dt;
     if (hurtTimer > 0) hurtTimer -= dt;
 
@@ -157,10 +233,60 @@ class HazeRoyaleGame extends Game with MatchListener {
     }
   }
 
-  bool _nearCamera(double x, double y) => (x - camX).abs() < 900 && (y - camY).abs() < 700;
+  bool _nearCamera(double x, double y) => (x - camX).abs() < 1100 && (y - camY).abs() < 900;
+
+  // ------------------------------------------------------------------ camera
+
+  /// Drag on the look pad: [dx] turns, [dy] tilts, both in screen pixels.
+  void orbitCamera(double dx, double dy) {
+    _manualCam = 5;
+    _yawGoal += dx * 0.006;
+    _tiltGoal = (_tiltGoal + dy * 0.004).clamp(Camera3D.minTilt, Camera3D.maxTilt);
+  }
+
+  /// Snaps the camera back behind the player (double tap on the look pad).
+  void recentreCamera() {
+    _manualCam = 0;
+    final v = sim.focus.vel;
+    _yawGoal = v.length2 > 100 ? math.atan2(v.x, -v.y) : 0;
+    _tiltGoal = camTiltSetting;
+  }
+
+  static double _wrap(double a) {
+    while (a > math.pi) {
+      a -= math.pi * 2;
+    }
+    while (a < -math.pi) {
+      a += math.pi * 2;
+    }
+    return a;
+  }
+
+  void _updateCamera(double dt) {
+    if (_manualCam > 0) {
+      _manualCam -= dt;
+    } else if (cameraFollow) {
+      final v = sim.focus.vel;
+      if (v.length2 > 2500) _yawGoal = math.atan2(v.x, -v.y);
+    } else {
+      _yawGoal = 0;
+    }
+    camYaw = _wrap(camYaw + _wrap(_yawGoal - camYaw) * math.min(1.0, dt * (_manualCam > 0 ? 9 : 2.2)));
+    camTilt += (_tiltGoal - camTilt) * math.min(1.0, dt * 6);
+  }
+
+  /// Royale slides from afternoon towards a smoky dusk; Blok Craft runs a
+  /// full day in about seven minutes.
+  void _updateSky(double dt) {
+    if (sim.mode == GameMode.craft) {
+      timeOfDay = (timeOfDay + dt / 420) % 1.0;
+    } else if (sim.phase == MatchPhase.running) {
+      timeOfDay = 0.40 + math.min(0.20, sim.time / 1100);
+    }
+  }
 
   void _adaptQuality(double dt) {
-    if (sim.phase != MatchPhase.running || dt > 0.25 || quality == 0) return;
+    if (sim.phase != MatchPhase.running || dt > 0.25 || quality <= 0) return;
     if (fps < 48) {
       _slowTime += dt;
     } else {
@@ -328,6 +454,43 @@ class HazeRoyaleGame extends Game with MatchListener {
     } else {
       _play3d('plant', t.x, t.y, gain: 0.5);
     }
+  }
+
+  int _blockColor(int type) => config.blocks.types[type].top.toARGB32();
+
+  @override
+  void onBlockMined(Actor a, int bx, int by, int type) {
+    final b = sim.blocks;
+    final x = b.wx(bx), y = b.wy(by);
+    if (_nearCamera(x, y)) fx.blockBurst(x, y, _blockColor(type), count: quality >= 2 ? 10 : 5);
+    if (identical(a, sim.player)) {
+      feedback.play('mine', volume: 0.75);
+    } else {
+      _play3d('mine', x, y, gain: 0.45);
+    }
+  }
+
+  @override
+  void onBlockPlaced(Actor a, int bx, int by, int type) {
+    final b = sim.blocks;
+    final x = b.wx(bx), y = b.wy(by);
+    if (_nearCamera(x, y) && quality >= 2) fx.blockBurst(x, y, _blockColor(type), count: 4, size: 3);
+    if (identical(a, sim.player)) {
+      feedback.play('place', volume: 0.7);
+    } else {
+      _play3d('place', x, y, gain: 0.4);
+    }
+  }
+
+  @override
+  void onBlockBroken(double x, double y, int type) {
+    if (_nearCamera(x, y)) fx.blockBurst(x, y, _blockColor(type), count: quality >= 2 ? 12 : 6, size: 6);
+    _play3d('mine', x, y, gain: 0.5);
+  }
+
+  @override
+  void onCrafted(Actor a, BlockRecipe recipe) {
+    if (identical(a, sim.player)) feedback.play('craft', volume: 0.85);
   }
 
   @override

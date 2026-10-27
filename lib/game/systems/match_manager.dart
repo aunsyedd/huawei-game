@@ -7,6 +7,7 @@ import '../components/bot.dart';
 import '../components/loot.dart';
 import '../components/projectile.dart';
 import '../components/tree.dart';
+import '../world/block_world.dart';
 import '../world/map_layout.dart';
 import 'bot_ai.dart';
 import 'combat_system.dart';
@@ -15,6 +16,10 @@ import 'spatial_grid.dart';
 import 'zone_system.dart';
 
 enum MatchPhase { dropping, running, ended }
+
+/// `royale` is the battle-royale match; `craft` is the open Blok Craft
+/// sandbox: no bots, no shrinking haze, mine and build as long as you like.
+enum GameMode { royale, craft }
 
 /// Hooks for sound, haptics, screen shake and HUD. All optional.
 abstract mixin class MatchListener {
@@ -25,6 +30,12 @@ abstract mixin class MatchListener {
   void onPickup(Actor a, LootItem item) {}
   void onReload(Actor a) {}
   void onTreePlanted(Actor a, Tree t) {}
+  void onBlockMined(Actor a, int bx, int by, int type) {}
+  void onBlockPlaced(Actor a, int bx, int by, int type) {}
+  void onCrafted(Actor a, BlockRecipe recipe) {}
+
+  /// A blaster broke a block at world position (x, y).
+  void onBlockBroken(double x, double y, int type) {}
   void onPlayerFinished(PlayerResult r) {}
   void onMatchEnd(Actor? winner) {}
 }
@@ -48,6 +59,8 @@ class PlayerResult {
     required this.tagOuts,
     required this.treesPlanted,
     required this.treesAlive,
+    this.blocksPlaced = 0,
+    this.blocksMined = 0,
     required this.timeSurvived,
     required this.hazeTime,
     required this.damageDealt,
@@ -55,6 +68,7 @@ class PlayerResult {
   });
 
   final int placement, totalPlayers, tagOuts, treesPlanted, treesAlive;
+  final int blocksPlaced, blocksMined;
   final double timeSurvived, hazeTime, damageDealt;
   final bool won;
 
@@ -62,6 +76,7 @@ class PlayerResult {
       ((totalPlayers - placement) * s.placementPoints +
               tagOuts * s.tagOut +
               treesPlanted * s.treePlanted +
+              blocksPlaced * s.blockPlaced +
               timeSurvived * s.perSecond +
               (won ? s.winBonus : 0))
           .round();
@@ -70,9 +85,15 @@ class PlayerResult {
 /// The whole match, as plain Dart: no widgets, no rendering.
 /// The Flame game drives it every frame; tests drive it headless.
 class MatchSimulation {
-  MatchSimulation(this.config, {int? seed, this.playerName = 'You', this.autopilotPlayer = false})
-    : rng = math.Random(seed),
-      map = MapLayout.generate(config.map, outdoorLoot: config.loot.outdoorSpawns) {
+  MatchSimulation(
+    this.config, {
+    int? seed,
+    this.playerName = 'You',
+    this.autopilotPlayer = false,
+    this.mode = GameMode.royale,
+  }) : rng = math.Random(seed),
+       map = MapLayout.generate(config.map, outdoorLoot: config.loot.outdoorSpawns) {
+    blocks = BlockWorld.generate(config.blocks, map, mode.name, rng);
     zone = ZoneSystem(config.zone, map.width, map.height, rng);
     combat = CombatSystem(this);
     lootSpawner = LootSpawner(this);
@@ -80,7 +101,7 @@ class MatchSimulation {
     actorGrid = SpatialHash(map.width, map.height, 160);
     treeGrid = SpatialHash(map.width, map.height, 200);
     _createActors();
-    lootSpawner.spawnInitial();
+    if (mode == GameMode.royale) lootSpawner.spawnInitial();
   }
 
   final GameConfig config;
@@ -88,7 +109,12 @@ class MatchSimulation {
   final MapLayout map;
   final String playerName;
   final bool autopilotPlayer;
+  final GameMode mode;
 
+  /// True while the shrinking haze is part of the match.
+  bool get hazeActive => mode == GameMode.royale;
+
+  late final BlockWorld blocks;
   late final ZoneSystem zone;
   late final CombatSystem combat;
   late final LootSpawner lootSpawner;
@@ -132,7 +158,8 @@ class MatchSimulation {
       player.brain = BotBrain.random(rng, bots.aimErrorDeg, bots.reactionTime, bots.aggression);
     }
     actors.add(player);
-    for (var i = 0; i < bots.count; i++) {
+    final botCount = mode == GameMode.craft ? 0 : bots.count;
+    for (var i = 0; i < botCount; i++) {
       final a = Actor(
         id: i + 1,
         name: bots.names[i % bots.names.length],
@@ -149,6 +176,9 @@ class MatchSimulation {
   /// Ends the drop phase. (x, y) is the player's chosen landing spot.
   void start(double x, double y) {
     final start = config.weapons[config.loot.startingWeapon]!;
+    final b = config.blocks;
+    final startBlocks = b.startBlocks[mode.name] ?? const <String, int>{};
+    final startSeeds = b.startSeeds[mode.name] ?? 0;
     for (final a in actors) {
       double px, py;
       if (identical(a, player)) {
@@ -169,6 +199,15 @@ class MatchSimulation {
       a.pos.setValues(px, py);
       a.slots[0] = WeaponInstance(start);
       a.activeSlot = 0;
+      a.seeds = math.min(config.loot.seed.maxCarry, a.seeds + startSeeds);
+      startBlocks.forEach((id, n) {
+        final t = b.indexOf[id];
+        if (t != null) a.give(t, n);
+      });
+      // Bots carry a couple of blocks so they can throw up cover when hurt.
+      if (a.brain != null && mode == GameMode.royale) {
+        a.give(b.indexOf['cobble'] ?? 0, 3 + rng.nextInt(4));
+      }
       a.brain?.lastCheckPos.setFrom(a.pos);
     }
     phase = MatchPhase.running;
@@ -177,11 +216,11 @@ class MatchSimulation {
   (double, double) _nearestFree(double x, double y) {
     x = x.clamp(40, map.width - 40);
     y = y.clamp(40, map.height - 40);
-    if (map.isFree(x, y, Actor.radius + 2)) return (x, y);
+    if (free(x, y, Actor.radius + 2)) return (x, y);
     for (var r = 20.0; r < 400; r += 20) {
       for (var a = 0.0; a < math.pi * 2; a += 0.4) {
         final px = x + math.cos(a) * r, py = y + math.sin(a) * r;
-        if (map.isFree(px, py, Actor.radius + 2)) return (px, py);
+        if (free(px, py, Actor.radius + 2)) return (px, py);
       }
     }
     final p = map.randomFreePoint(rng);
@@ -202,10 +241,29 @@ class MatchSimulation {
     return inside;
   }
 
-  bool isSafeAt(double x, double y) => zone.isSafe(x, y) || inTreeBubble(x, y);
+  bool isSafeAt(double x, double y) =>
+      !hazeActive || zone.isSafe(x, y) || inTreeBubble(x, y) || blocks.bubbleAt(x, y);
+
+  // ----- Collision that includes the voxel layer -----
+
+  /// Free ground: no wall, obstacle or block column in the way.
+  bool free(double x, double y, double r) => map.isFree(x, y, r) && !blocks.overlapsCircle(x, y, r);
+
+  /// Line of sight through walls and block columns.
+  bool visible(double x0, double y0, double x1, double y1) =>
+      map.lineOfSight(x0, y0, x1, y1) && !blocks.blocksLine(x0, y0, x1, y1);
+
+  /// Pushes a circle out of walls, obstacles and blocks.
+  void resolve(double x, double y, double r, List<double> out) {
+    map.resolveCircle(x, y, r, out);
+    blocks.resolveCircle(out[0], out[1], r, out);
+    out[0] = out[0].clamp(r, map.width - r);
+    out[1] = out[1].clamp(r, map.height - r);
+  }
 
   bool canPlantAt(Actor a) {
     if (map.buildingAt(a.pos.x, a.pos.y) != null) return false;
+    if (blocks.solidAt(a.pos.x, a.pos.y)) return false;
     for (final t in trees) {
       if (!t.alive) continue;
       final dx = t.x - a.pos.x, dy = t.y - a.pos.y;
@@ -229,6 +287,12 @@ class MatchSimulation {
       case ActorAction.planting:
         if (a.seeds <= 0 || !canPlantAt(a)) return false;
         duration = config.trees.plantTime;
+      case ActorAction.mining:
+        final (bx, by) = targetColumn(a);
+        if (blocks.height(bx, by) == 0) return false;
+        a.mineX = bx;
+        a.mineY = by;
+        duration = blocks.mineTime(bx, by);
       case ActorAction.none:
         return false;
     }
@@ -256,10 +320,127 @@ class MatchSimulation {
         a.treesPlanted++;
         effects.spawn(t.x, t.y, 50, 0.6, 0xFF66BB6A);
         listener?.onTreePlanted(a, t);
+      case ActorAction.mining:
+        final bx = a.mineX, by = a.mineY;
+        final drop = blocks.mineTop(bx, by);
+        if (drop >= 0) {
+          a.give(drop, 1);
+          a.blocksMined++;
+          listener?.onBlockMined(a, bx, by, drop);
+        }
       case ActorAction.none:
         break;
     }
     a.cancelAction();
+  }
+
+  // ----- Blocks: mine, build, craft -----
+
+  /// The column the actor is pointing at: the nearest one holding a block
+  /// within reach, so you always break what is actually in your way, and
+  /// otherwise the empty column at arm's length, where a new block goes.
+  (int, int) targetColumn(Actor a) {
+    final size = config.blocks.size;
+    final reach = size * config.blocks.reach;
+    final cos = math.cos(a.aimAngle), sin = math.sin(a.aimAngle);
+    for (var d = Actor.radius + 2; d < reach; d += size * 0.4) {
+      final bx = blocks.gx(a.pos.x + cos * d), by = blocks.gy(a.pos.y + sin * d);
+      if (blocks.height(bx, by) > 0) return (bx, by);
+    }
+    return (blocks.gx(a.pos.x + cos * reach), blocks.gy(a.pos.y + sin * reach));
+  }
+
+  /// Starts (or keeps) breaking the block in front of the actor.
+  bool startMining(Actor a) => startAction(a, ActorAction.mining);
+
+  /// Puts the selected block on top of the column in front of the actor.
+  bool placeBlock(Actor a) {
+    if (!a.alive || a.busy || a.placeCooldown > 0) return false;
+    final type = a.selected;
+    if (a.carried(type) <= 0) return false;
+    final (bx, by) = targetColumn(a);
+    if (blocks.height(bx, by) == 0) {
+      // Never bury somebody standing there.
+      final cx = blocks.wx(bx), cy = blocks.wy(by);
+      for (final o in actors) {
+        if (!o.alive) continue;
+        if ((o.pos.x - cx).abs() < config.blocks.size * 0.5 + Actor.radius &&
+            (o.pos.y - cy).abs() < config.blocks.size * 0.5 + Actor.radius) {
+          return false;
+        }
+      }
+    }
+    if (!blocks.place(bx, by, type, map)) return false;
+    a.take(type, 1);
+    a.placeCooldown = config.blocks.placeCooldown;
+    a.blocksPlaced++;
+    if (a.carried(type) == 0) a.selected = _firstCarried(a, type);
+    listener?.onBlockPlaced(a, bx, by, type);
+    return true;
+  }
+
+  int _firstCarried(Actor a, int fallback) {
+    for (final t in a.blocks.keys) {
+      if (a.carried(t) > 0) return t;
+    }
+    return fallback;
+  }
+
+  /// Turns the recipe's inputs into its output. Returns false if short.
+  bool craft(Actor a, int recipeIndex) {
+    final recipes = config.blocks.recipes;
+    if (recipeIndex < 0 || recipeIndex >= recipes.length) return false;
+    final r = recipes[recipeIndex];
+    final needed = <int, int>{};
+    for (final e in r.inputs.entries) {
+      final t = config.blocks.indexOf[e.key];
+      if (t == null || a.carried(t) < e.value) return false;
+      needed[t] = e.value;
+    }
+    if (r.item) {
+      switch (r.out) {
+        case 'seed':
+          if (a.seeds >= config.loot.seed.maxCarry) return false;
+        case 'water':
+          if (a.water >= config.loot.water.maxCarry) return false;
+        default:
+          return false;
+      }
+    }
+    needed.forEach(a.take);
+    if (r.item) {
+      if (r.out == 'seed') {
+        a.seeds = math.min(config.loot.seed.maxCarry, a.seeds + r.count);
+      } else {
+        a.water = math.min(config.loot.water.maxCarry, a.water + r.count);
+      }
+    } else {
+      final t = config.blocks.indexOf[r.out];
+      if (t == null) return false;
+      a.give(t, r.count);
+    }
+    listener?.onCrafted(a, r);
+    return true;
+  }
+
+  /// True when the actor has everything a recipe needs.
+  bool canCraft(Actor a, int recipeIndex) {
+    final recipes = config.blocks.recipes;
+    if (recipeIndex < 0 || recipeIndex >= recipes.length) return false;
+    for (final e in recipes[recipeIndex].inputs.entries) {
+      final t = config.blocks.indexOf[e.key];
+      if (t == null || a.carried(t) < e.value) return false;
+    }
+    return true;
+  }
+
+  /// Block types the player is carrying, in config order (the hotbar).
+  List<int> hotbar(Actor a) {
+    final out = <int>[];
+    for (final t in config.blocks.types) {
+      if (a.carried(t.index) > 0) out.add(t.index);
+    }
+    return out;
   }
 
   // ----- Player commands -----
@@ -304,7 +485,7 @@ class MatchSimulation {
     if (feed.length > 30) feed.removeAt(0);
     listener?.onTagOut(victim, by, cause);
     if (identical(victim, player)) _snapshotPlayer(won: false);
-    if (aliveCount <= 1) _end();
+    if (aliveCount <= 1 && mode == GameMode.royale) _end();
   }
 
   void _snapshotPlayer({required bool won}) {
@@ -315,6 +496,8 @@ class MatchSimulation {
       tagOuts: player.tagOuts,
       treesPlanted: player.treesPlanted,
       treesAlive: trees.where((t) => t.alive && identical(t.planter, player)).length,
+      blocksPlaced: player.blocksPlaced,
+      blocksMined: player.blocksMined,
       timeSurvived: player.timeAlive,
       hazeTime: player.hazeTime,
       damageDealt: player.damageDealt,
@@ -350,7 +533,7 @@ class MatchSimulation {
   void update(double dt) {
     if (phase != MatchPhase.running) return;
     time += dt;
-    zone.update(dt);
+    if (hazeActive) zone.update(dt);
 
     actorGrid.clear();
     for (final a in actors) {
@@ -376,16 +559,20 @@ class MatchSimulation {
       a.timeAlive += dt;
       a.hitFlash = math.max(0, a.hitFlash - dt);
       if (a.hazeShield > 0) a.hazeShield -= dt;
+      if (a.placeCooldown > 0) a.placeCooldown -= dt;
 
       if (a.brain != null) {
         botAi.update(a, dt);
-      } else if (a.busy && a.moveInput.length2 > 0.04) {
-        a.cancelAction(); // Moving interrupts healing / planting.
+      } else if (a.busy && a.action != ActorAction.mining && a.moveInput.length2 > 0.04) {
+        a.cancelAction(); // Moving interrupts healing / planting (but not mining).
       }
 
       if (a.busy) {
         a.actionTime += dt;
         if (a.actionTime >= a.actionDuration) _finishAction(a);
+      } else if (a.wantMine) {
+        // Hold the mine button and the actor chews through the whole column.
+        startMining(a);
       }
 
       // Movement.
@@ -396,7 +583,7 @@ class MatchSimulation {
         a.vel.setValues(a.moveInput.x * a.speed, a.moveInput.y * a.speed);
       }
       if (a.vel.x != 0 || a.vel.y != 0) {
-        map.resolveCircle(a.pos.x + a.vel.x * dt, a.pos.y + a.vel.y * dt, Actor.radius, _tmp);
+        resolve(a.pos.x + a.vel.x * dt, a.pos.y + a.vel.y * dt, Actor.radius, _tmp);
         a.pos.setValues(_tmp[0], _tmp[1]);
       }
 
@@ -413,6 +600,13 @@ class MatchSimulation {
           if (phase == MatchPhase.ended) return;
           continue;
         }
+      }
+
+      // Mining follows the actor: walking away, turning, or a blaster
+      // breaking the block starts a fresh swing at whatever is in front now.
+      if (a.action == ActorAction.mining) {
+        final (bx, by) = targetColumn(a);
+        if (blocks.height(a.mineX, a.mineY) == 0 || bx != a.mineX || by != a.mineY) a.cancelAction();
       }
 
       // Auto pickups.
@@ -438,7 +632,7 @@ class MatchSimulation {
     }
     effects.update(dt);
 
-    if (time > config.zone.maxMatchTime && phase == MatchPhase.running) _forceEnd();
+    if (hazeActive && time > config.zone.maxMatchTime && phase == MatchPhase.running) _forceEnd();
   }
 
   void _separateActors() {
@@ -451,9 +645,9 @@ class MatchSimulation {
         final d2 = dx * dx + dy * dy;
         if (d2 >= minD * minD || d2 < 0.01) return false;
         final d = math.sqrt(d2), push = (minD - d) / 2;
-        map.resolveCircle(a.pos.x - dx / d * push, a.pos.y - dy / d * push, Actor.radius, _tmp);
+        resolve(a.pos.x - dx / d * push, a.pos.y - dy / d * push, Actor.radius, _tmp);
         a.pos.setValues(_tmp[0], _tmp[1]);
-        map.resolveCircle(o.pos.x + dx / d * push, o.pos.y + dy / d * push, Actor.radius, _tmp);
+        resolve(o.pos.x + dx / d * push, o.pos.y + dy / d * push, Actor.radius, _tmp);
         o.pos.setValues(_tmp[0], _tmp[1]);
         return false;
       });

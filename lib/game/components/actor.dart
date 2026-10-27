@@ -5,7 +5,7 @@ import 'package:vector_math/vector_math.dart';
 import '../../data/game_config.dart';
 import 'bot.dart';
 
-enum ActorAction { none, healing, masking, planting }
+enum ActorAction { none, healing, masking, planting, mining }
 
 class WeaponInstance {
   WeaponInstance(this.stats) : ammo = stats.magazine;
@@ -45,11 +45,43 @@ class Actor {
   double fireCooldown = 0;
   double hazeShield = 0;
 
+  // ---- Voxel building ----
+  /// Block type index -> how many are carried.
+  final Map<int, int> blocks = {};
+
+  /// Block type index selected on the hotbar.
+  int selected = 0;
+  bool wantMine = false;
+  double placeCooldown = 0;
+
+  /// Column being mined while [action] is [ActorAction.mining].
+  int mineX = -1, mineY = -1;
+
+  int carried(int type) => blocks[type] ?? 0;
+
+  void give(int type, int count) {
+    if (count <= 0) return;
+    blocks[type] = carried(type) + count;
+    if (carried(selected) == 0) selected = type;
+  }
+
+  bool take(int type, int count) {
+    if (carried(type) < count) return false;
+    final left = carried(type) - count;
+    if (left == 0) {
+      blocks.remove(type);
+    } else {
+      blocks[type] = left;
+    }
+    return true;
+  }
+
   ActorAction action = ActorAction.none;
   double actionTime = 0, actionDuration = 0;
 
   // Stats for results.
   int tagOuts = 0, treesPlanted = 0, placement = 0;
+  int blocksMined = 0, blocksPlaced = 0;
   double timeAlive = 0, hazeTime = 0, damageDealt = 0;
 
   // Feedback.
@@ -67,5 +99,7 @@ class Actor {
   void cancelAction() {
     action = ActorAction.none;
     actionTime = 0;
+    mineX = -1;
+    mineY = -1;
   }
 }

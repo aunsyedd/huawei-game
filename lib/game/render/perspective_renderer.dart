@@ -3,82 +3,55 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import '../components/actor.dart';
-import '../components/building.dart';
 import '../haze_royale_game.dart';
 import '../systems/match_manager.dart';
+import '../world/block_world.dart';
+import 'camera3d.dart';
 import 'fx.dart';
+import 'mesh.dart';
+import 'models.dart';
+import 'sky.dart';
 import 'sprites.dart';
+import 'voxels.dart';
 
-/// Something standing up out of the ground, depth-sorted each frame.
-class _Item {
-  int kind = 0; // 0 obstacle, 1 wall, 2 roof, 3 actor, 4 tree, 5 projectile, 6 loot
-  int index = 0;
-  double key = 0;
-}
-
-/// Tilted 3D camera ("2.5D"): the ground is drawn through a perspective
-/// matrix, upright things are projected point by point and painted
-/// back-to-front. World axes: x right, y towards the camera (south), z up.
+/// Full 3D renderer. A real orbit camera ([Camera3D]) can be turned and
+/// tilted freely; the flat ground goes through its 4x4 plane transform while
+/// every upright thing — buildings, voxels, trees, characters, shots — is
+/// projected vertex by vertex, lit, fogged and depth-sorted into one
+/// `drawVertices` call.
 ///
-/// Performance: repeated objects are single blits from [Sprites.atlas]; groups
-/// (splats, shadows, smoke, droplets, glows) are batched into one
-/// `drawRawAtlas` each; [HazeRoyaleGame.quality] drops extras on slow devices.
+/// World axes: x east, y south, z up. The simulation itself stays 2D.
+///
+/// Performance: repeated flat things are single blits from [Sprites.atlas];
+/// groups (splats, shadows, smoke, droplets, glows) are batched into one
+/// `drawRawAtlas` each; [HazeRoyaleGame.quality] (3 = ultra … 0 = minimal)
+/// drops shadows, texture detail and particles on slower devices.
 class PerspectiveRenderer {
-  PerspectiveRenderer(this.game) {
-    final map = game.sim.map;
-    for (var b = 0; b < map.buildings.length; b++) {
-      for (final _ in map.buildings[b].walls) {
-        _wallBuilding.add(b);
-      }
-      final bld = map.buildings[b];
-      _heights.add(switch (bld.style) {
-        'town' => 88.0,
-        'kampung' => 64.0,
-        'beach' => 50.0,
-        _ => 58.0,
-      });
-      _roofDark.add(Color.lerp(bld.roofColor, const Color(0xFF000000), 0.3)!);
-      _roofLight.add(Color.lerp(bld.roofColor, const Color(0xFFFFFFFF), 0.14)!);
-      final wall = switch (bld.style) {
-        'town' => const Color(0xFFF1EBE2),
-        'kampung' => const Color(0xFFA0704A),
-        'beach' => const Color(0xFFDCC392),
-        'plantation' => const Color(0xFF9AACB4),
-        _ => const Color(0xFF80604A),
-      };
-      _wallFront.add(wall);
-      _wallSide.add(Color.lerp(wall, const Color(0xFF000000), 0.28)!);
-      _wallTop.add(Color.lerp(wall, const Color(0xFF000000), 0.5)!);
-    }
-    for (var i = 0; i < 900; i++) {
-      _pool.add(_Item());
-    }
-  }
+  PerspectiveRenderer(this.game);
 
   final HazeRoyaleGame game;
-  final Image _atlas = Sprites.instance.atlas;
+  late final Image _atlas = Sprites.build(skins: [for (final k in game.config.progression.skins) k.color]).atlas;
 
-  /// Camera tilt from straight down, and distance to the look-at point.
-  static const double tilt = 0.74; // ~42°
+  /// Default camera tilt from straight down, and eye distance.
+  static const double tilt = Camera3D.defaultTilt;
   static const double distance = 1200;
-  static final double _sinT = math.sin(tilt), _cosT = math.cos(tilt);
 
-  // Per-frame camera.
-  double _cx = 0, _cy = 0, _f = 1, _w2 = 0, _h0 = 0;
-  final Float64List _m = Float64List(16);
+  final Camera3D cam = Camera3D()..distance = distance;
+  final SkyBox sky = SkyBox();
+  late final VoxelRenderer voxels = VoxelRenderer(game.config.blocks);
 
-  // Last projection result.
-  double _px = 0, _py = 0, _ps = 1;
+  /// Sun direction, light colours and fog for the current time of day.
+  Lighting light = Lighting.forTime(0.42, 0.25);
+
+  /// Triangles queued in the last frame (diagnostics).
+  int lastTriangles = 0;
+
+  double get _px => cam.px;
+  double get _py => cam.py;
+  double get _ps => cam.ps;
 
   /// Screen position from the last successful [project] call.
-  Offset get projected => Offset(_px, _py);
-
-  final List<int> _wallBuilding = [];
-  final List<double> _heights = [];
-  final List<Color> _roofDark = [], _roofLight = [], _wallFront = [], _wallSide = [], _wallTop = [];
-  final List<_Item> _pool = [];
-  final List<_Item> _draw = [];
-  int _used = 0;
+  Offset get projected => cam.projected;
 
   final Path _path = Path();
   final Path _path2 = Path();
@@ -90,6 +63,10 @@ class PerspectiveRenderer {
   final Paint _additive = Paint()
     ..filterQuality = FilterQuality.low
     ..blendMode = BlendMode.plus;
+  final Paint _outline = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 2.5
+    ..color = const Color(0xCCFFFFFF);
 
   // Batches (one draw call each).
   final AtlasBatch _groundShadows = AtlasBatch(160);
@@ -97,8 +74,6 @@ class PerspectiveRenderer {
   final AtlasBatch _groundGlows = AtlasBatch(200);
   final AtlasBatch _overlayTinted = AtlasBatch(600);
   final AtlasBatch _overlayGlows = AtlasBatch(500);
-  final Float32List _one4 = Float32List(4), _oneRect = Float32List(4);
-  final Int32List _oneColor = Int32List(1);
 
   Paint? _vignette;
   double _vignetteFor = -1;
@@ -114,87 +89,32 @@ class PerspectiveRenderer {
 
   static int _argb(double a, int rgb) => ((a.clamp(0.0, 1.0) * 255).round() << 24) | (rgb & 0xFFFFFF);
 
-  /// One sprite from the atlas at a screen point (keeps depth order).
-  void _blit(Canvas c, Rect src, double cx, double cy, double width, {double alpha = 1, double rot = 0}) {
-    if (rot == 0 && alpha >= 1) {
-      final h = width * src.height / src.width;
-      c.drawImageRect(_atlas, src, Rect.fromCenter(center: Offset(cx, cy), width: width, height: h), _img);
-      return;
-    }
-    final scale = width / src.width;
-    final scos = math.cos(rot) * scale, ssin = math.sin(rot) * scale;
-    _one4
-      ..[0] = scos
-      ..[1] = ssin
-      ..[2] = cx - scos * src.width / 2 + ssin * src.height / 2
-      ..[3] = cy - ssin * src.width / 2 - scos * src.height / 2;
-    _oneRect
-      ..[0] = src.left
-      ..[1] = src.top
-      ..[2] = src.right
-      ..[3] = src.bottom;
-    _oneColor[0] = _argb(alpha, 0xFFFFFF);
-    c.drawRawAtlas(_atlas, _one4, _oneRect, _oneColor, BlendMode.modulate, null, _img);
-  }
-
   // --------------------------------------------------------------- camera
 
   void setCamera(double camX, double camY) {
     final g = game;
-    _cx = camX;
-    _cy = camY;
-    _f = g.zoom * distance;
-    _w2 = g.viewW / 2;
-    _h0 = g.viewH * 0.6;
-    final d = distance + camY * _sinT;
-    // Column-major storage: index = col * 4 + row.
-    void set(int row, int col, double v) => _m[col * 4 + row] = v;
-    _m.fillRange(0, 16, 0);
-    set(0, 0, _f);
-    set(0, 1, -_w2 * _sinT);
-    set(0, 2, -_w2 * _cosT);
-    set(0, 3, _w2 * d - _f * camX);
-    set(1, 1, -_h0 * _sinT + _f * _cosT);
-    set(1, 2, -_h0 * _cosT - _f * _sinT);
-    set(1, 3, _h0 * d - _f * _cosT * camY);
-    set(2, 2, 1);
-    set(3, 1, -_sinT);
-    set(3, 2, -_cosT);
-    set(3, 3, d);
+    cam
+      ..targetX = camX
+      ..targetY = camY
+      ..yaw = g.camYaw
+      ..tilt = g.camTilt
+      ..zoom = g.zoom
+      ..viewW = g.viewW
+      ..viewH = g.viewH
+      ..update();
   }
 
-  /// Projects a world point; result in [_px], [_py], scale in [_ps].
-  bool project(double x, double y, double z) {
-    final w = distance - (y - _cy) * _sinT - z * _cosT;
-    if (w < 20) return false;
-    _px = _w2 + _f * (x - _cx) / w;
-    _py = _h0 + _f * (_cosT * (y - _cy) - _sinT * z) / w;
-    _ps = _f / w;
-    return true;
-  }
+  /// Projects a world point; result in [projected], scale in [_ps].
+  bool project(double x, double y, double z) => cam.project(x, y, z);
 
   /// Screen point → ground point (z = 0).
-  (double, double) unproject(double sx, double sy) {
-    final a = sy - _h0;
-    final denom = math.max(_f * _cosT + a * _sinT, 1.0);
-    final dy = a * distance / denom;
-    final w = distance - dy * _sinT;
-    final dx = (sx - _w2) * w / _f;
-    return (_cx + dx, _cy + dy);
-  }
+  (double, double) unproject(double sx, double sy) => cam.unproject(sx, sy);
 
-  Rect _visibleGround() {
-    final g = game;
-    final (x0, y0) = unproject(0, 0);
-    final (x1, _) = unproject(g.viewW, 0);
-    final (x2, y2) = unproject(0, g.viewH);
-    final (x3, _) = unproject(g.viewW, g.viewH);
-    return Rect.fromLTRB(
-      math.min(math.min(x0, x2), math.min(x1, x3)),
-      y0,
-      math.max(math.max(x0, x2), math.max(x1, x3)),
-      y2,
-    );
+  /// How thick the air is right now, 0..1 (drives sky tint and fog).
+  double get hazeAmount {
+    final sim = game.sim;
+    if (!sim.hazeActive) return 0.06;
+    return (0.26 + 0.1 * sim.zone.phaseIndex).clamp(0.0, 0.8);
   }
 
   // --------------------------------------------------------------- frame
@@ -203,102 +123,88 @@ class PerspectiveRenderer {
     final g = game;
     final sim = g.sim;
     setCamera(camX, camY);
-    final visible = _visibleGround();
+    final haze = hazeAmount;
+    light = Lighting.forTime(g.timeOfDay, haze);
+    voxels.prepare(light, cam);
+    sky.draw(canvas, cam, light, haze, g.clock, _q);
+
+    final visible = cam.visibleGround();
     final cull = visible.inflate(120);
     final running = sim.phase != MatchPhase.dropping;
+    final skyLine = math.max(0.0, cam.horizonY);
 
-    // Ground layer through the perspective matrix.
+    // Ground layer through the camera's plane transform. Anything above the
+    // horizon line would fold back on itself, so it is clipped away.
     canvas.save();
-    canvas.transform(_m);
-    _drawSea(canvas, visible);
+    canvas.clipRect(Rect.fromLTRB(0, skyLine, g.viewW, g.viewH));
+    canvas.transform(cam.matrix);
+    _drawShore(canvas, visible);
     g.drawChunks(canvas, visible);
+    _tintGround(canvas, visible);
     if (!running) {
       canvas.restore();
       return; // The landing map covers the screen; skip the 3D world.
     }
-    _drawTreeBubbles(canvas, cull);
+    _drawBubbles(canvas, cull);
     _groundBatches(canvas, cull);
     g.drawEffects(canvas, cull);
     g.drawZoneLines(canvas);
     g.drawAimLine(canvas);
     canvas.restore();
 
-    // Upright things, back to front.
-    _collect(cull);
-    final f = sim.focus.pos;
-    for (final it in _draw) {
-      switch (it.kind) {
-        case 0:
-          _drawObstacle(canvas, it.index, f.x, f.y);
-        case 1:
-          _drawWall(canvas, it.index, f.x, f.y);
-        case 2:
-          _drawRoof(canvas, it.index, f.x, f.y);
-        case 3:
-          _drawActor(canvas, sim.actors[it.index]);
-        case 4:
-          _drawTree(canvas, it.index);
-        case 5:
-          _drawProjectile(canvas, it.index);
-        case 6:
-          _drawLoot(canvas, it.index);
-      }
-    }
+    // Everything standing up is a lit 3D mesh, depth-sorted per triangle.
+    _drawAirBand(canvas, skyLine);
 
-    _drawHaze(canvas, visible);
-    _drawHazeWall(canvas, cull);
-    if (_q >= 2) _addHazeSmoke();
+    _emitWorld(cull);
+    lastTriangles = _tris.n + _shadowTris.n;
+    _shadowTris.draw(canvas);
+    _tris.draw(canvas);
+    _drawBlockTarget(canvas);
+    _drawLabels(canvas);
+
+    if (sim.hazeActive) {
+      _drawHaze(canvas, visible, skyLine);
+      _drawHazeWall(canvas, cull);
+      if (_q >= 2) _addHazeSmoke();
+    }
     _addFxParticles(cull);
     _overlayTinted.draw(canvas, _atlas, _img);
     _overlayGlows.draw(canvas, _atlas, _additive);
   }
 
-  void _add(int kind, int index, double key) {
-    if (_used >= _pool.length) _pool.add(_Item());
-    final it = _pool[_used++]
-      ..kind = kind
-      ..index = index
-      ..key = key;
-    _draw.add(it);
+  /// The baked ground textures are painted for full daylight, so dusk and
+  /// night are applied as a multiply over the ground layer. Without this the
+  /// island would stay sunlit while everything standing on it turns blue.
+  void _tintGround(Canvas canvas, Rect visible) {
+    const ref = 1.26; // roughly the daytime top-face light
+    final k = light.lz * 0.95;
+    final r = ((light.ar + light.dr * k) / ref).clamp(0.0, 1.0);
+    final g = ((light.ag + light.dg * k) / ref).clamp(0.0, 1.0);
+    final b = ((light.ab + light.db * k) / ref).clamp(0.0, 1.0);
+    if (r > 0.985 && g > 0.985 && b > 0.985) return;
+    canvas.drawRect(
+      visible.inflate(200),
+      Paint()
+        ..color = Color.fromRGBO((r * 255).round(), (g * 255).round(), (b * 255).round(), 1)
+        ..blendMode = BlendMode.modulate,
+    );
   }
 
-  void _collect(Rect cull) {
-    final sim = game.sim;
-    final map = sim.map;
-    _draw.clear();
-    _used = 0;
-    for (var i = 0; i < map.obstacles.length; i++) {
-      final o = map.obstacles[i];
-      if (o.x > cull.left && o.x < cull.right && o.y > cull.top && o.y < cull.bottom) _add(0, i, o.y);
-    }
-    for (var i = 0; i < map.walls.length; i++) {
-      final w = map.walls[i];
-      if (w.overlaps(cull)) _add(1, i, w.bottom - 0.01);
-    }
-    final f = sim.focus.pos;
-    for (var i = 0; i < map.buildings.length; i++) {
-      final b = map.buildings[i];
-      // No roof over the building the camera's player is in (cutaway view).
-      if (b.rect.overlaps(cull) && !b.contains(f.x, f.y)) _add(2, i, b.rect.bottom + 0.5);
-    }
-    for (var i = 0; i < sim.actors.length; i++) {
-      final a = sim.actors[i];
-      if (a.alive && cull.contains(Offset(a.pos.x, a.pos.y))) _add(3, i, a.pos.y);
-    }
-    for (var i = 0; i < sim.trees.length; i++) {
-      final t = sim.trees[i];
-      if (t.alive && cull.contains(Offset(t.x, t.y))) _add(4, i, t.y);
-    }
-    final ps = sim.projectiles.items;
-    for (var i = 0; i < ps.length; i++) {
-      final p = ps[i];
-      if (p.active && cull.contains(Offset(p.x, p.y))) _add(5, i, p.y);
-    }
-    for (var i = 0; i < sim.loot.length; i++) {
-      final l = sim.loot[i];
-      if (!l.taken && cull.contains(Offset(l.x, l.y))) _add(6, i, l.y);
-    }
-    _draw.sort((a, b) => a.key.compareTo(b.key));
+  /// A band of air between the far ground and the sky, so the island melts
+  /// into the horizon instead of ending at a hard edge.
+  void _drawAirBand(Canvas canvas, double skyLine) {
+    if (skyLine > game.viewH) return;
+    final top = math.max(0.0, skyLine);
+    final depth = game.viewH * 0.42;
+    canvas.drawRect(
+      Rect.fromLTRB(0, top, game.viewW, top + depth),
+      Paint()
+        ..shader = Gradient.linear(
+          Offset(0, top),
+          Offset(0, top + depth),
+          [light.fog.withValues(alpha: 0.96), light.fog.withValues(alpha: 0)],
+        ),
+    );
   }
 
   /// See-through when this object sits between the camera and the player.
@@ -308,7 +214,7 @@ class PerspectiveRenderer {
   // --------------------------------------------------------------- ground layer
 
   /// Animated foam lines where the sea meets the island.
-  void _drawSea(Canvas canvas, Rect visible) {
+  void _drawShore(Canvas canvas, Rect visible) {
     final map = game.sim.map;
     final t = game.clock;
     if (visible.left > 30 && visible.right < map.width - 30 && visible.top > 30 && visible.bottom < map.height - 30) {
@@ -345,18 +251,34 @@ class PerspectiveRenderer {
     canvas.drawPath(_path, paint);
   }
 
-  void _drawTreeBubbles(Canvas canvas, Rect cull) {
+  /// Clean-air bubbles: planted trees and air-filter blocks.
+  void _drawBubbles(Canvas canvas, Rect cull) {
     final t = game.clock;
+    void bubble(double x, double y, double r, Color fillColor, Color edge) {
+      final o = Offset(x, y);
+      if (!cull.inflate(r).contains(o)) return;
+      canvas.drawCircle(o, r, _fill(fillColor));
+      canvas.drawCircle(o, r, _line(edge, 4));
+      if (_q >= 2) {
+        final pr = r * (0.55 + 0.45 * ((t * 0.5 + x * 0.001) % 1));
+        canvas.drawCircle(o, pr, _line(Color.fromRGBO(200, 255, 200, 0.35 * (1 - pr / r)), 3));
+      }
+    }
+
     for (final tree in game.sim.trees) {
       if (!tree.alive || tree.bubble <= 0) continue;
-      final o = Offset(tree.x, tree.y);
-      if (!cull.inflate(tree.bubble).contains(o)) continue;
-      canvas.drawCircle(o, tree.bubble, _fill(const Color(0x2481C784)));
-      canvas.drawCircle(o, tree.bubble, _line(const Color(0xBB7CDB80), 4));
-      if (_q >= 2) {
-        final pr = tree.bubble * (0.55 + 0.45 * ((t * 0.5 + tree.x * 0.001) % 1));
-        canvas.drawCircle(o, pr, _line(Color.fromRGBO(200, 255, 200, 0.35 * (1 - pr / tree.bubble)), 3));
+      bubble(tree.x, tree.y, tree.bubble, const Color(0x2481C784), const Color(0xBB7CDB80));
+    }
+    final blocks = game.sim.blocks;
+    for (final col in blocks.filters) {
+      final bx = BlockWorld.keyX(col), by = BlockWorld.keyY(col);
+      var r = 0.0;
+      final h = blocks.height(bx, by);
+      for (var z = 0; z < h; z++) {
+        final ty = blocks.typeAt(bx, by, z);
+        if (ty >= 0 && blocks.cfg.types[ty].bubble > r) r = blocks.cfg.types[ty].bubble;
       }
+      if (r > 0) bubble(blocks.wx(bx), blocks.wy(by), r, const Color(0x2680DEEA), const Color(0xAA4DD0E1));
     }
   }
 
@@ -371,9 +293,12 @@ class PerspectiveRenderer {
       final fade = (1 - d.age / FxSystem.decalLife).clamp(0.0, 1.0);
       _groundDecals.add(Sprites.splats[d.variant], d.x, d.y, d.size, _argb(0.55 * fade, d.color), d.rot);
     }
-    for (final a in sim.actors) {
-      if (!a.alive || !cull.contains(Offset(a.pos.x, a.pos.y))) continue;
-      _groundShadows.add(Sprites.shadowOval, a.pos.x + 7, a.pos.y + 6, 56, 0xFFFFFFFF);
+    // At ultra the characters cast real mesh shadows instead of blobs.
+    if (_q < 3) {
+      for (final a in sim.actors) {
+        if (!a.alive || !cull.contains(Offset(a.pos.x, a.pos.y))) continue;
+        _groundShadows.add(Sprites.shadowOval, a.pos.x + 7, a.pos.y + 6, 56, 0xFFFFFFFF);
+      }
     }
     for (final t in sim.trees) {
       if (!t.alive || !cull.contains(Offset(t.x, t.y))) continue;
@@ -395,280 +320,331 @@ class PerspectiveRenderer {
     final p = sim.player;
     if (p.alive) {
       final pulse = 1 + math.sin(t * 4) * 0.06;
-      canvas.drawCircle(Offset(p.pos.x, p.pos.y), 28 * pulse, _line(const Color(0xAA4FC3F7), 3));
-    }
-  }
-
-  // --------------------------------------------------------------- upright helpers
-
-  bool _quadPath(
-    double x0,
-    double y0,
-    double z0,
-    double x1,
-    double y1,
-    double z1,
-    double x2,
-    double y2,
-    double z2,
-    double x3,
-    double y3,
-    double z3,
-  ) {
-    _path.reset();
-    if (!project(x0, y0, z0)) return false;
-    _path.moveTo(_px, _py);
-    if (!project(x1, y1, z1)) return false;
-    _path.lineTo(_px, _py);
-    if (!project(x2, y2, z2)) return false;
-    _path.lineTo(_px, _py);
-    if (!project(x3, y3, z3)) return false;
-    _path.lineTo(_px, _py);
-    _path.close();
-    return true;
-  }
-
-  void _quad(
-    Canvas c,
-    double x0,
-    double y0,
-    double z0,
-    double x1,
-    double y1,
-    double z1,
-    double x2,
-    double y2,
-    double z2,
-    double x3,
-    double y3,
-    double z3,
-    Color color,
-  ) {
-    if (_quadPath(x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3)) c.drawPath(_path, _fill(color));
-  }
-
-  /// Vertical face along x at depth y (a south-facing wall face).
-  void _faceY(Canvas c, double x0, double x1, double y, double z0, double z1, Color color) =>
-      _quad(c, x0, y, z0, x1, y, z0, x1, y, z1, x0, y, z1, color);
-
-  /// Vertical face along y at x (an east/west wall face).
-  void _faceX(Canvas c, double x, double y0, double y1, double z0, double z1, Color color) =>
-      _quad(c, x, y0, z0, x, y1, z0, x, y1, z1, x, y0, z1, color);
-
-  void _tri(
-    Canvas c,
-    double x0,
-    double y0,
-    double z0,
-    double x1,
-    double y1,
-    double z1,
-    double x2,
-    double y2,
-    double z2,
-    Color color,
-  ) {
-    _path.reset();
-    if (!project(x0, y0, z0)) return;
-    _path.moveTo(_px, _py);
-    if (!project(x1, y1, z1)) return;
-    _path.lineTo(_px, _py);
-    if (!project(x2, y2, z2)) return;
-    _path.lineTo(_px, _py);
-    _path.close();
-    c.drawPath(_path, _fill(color));
-  }
-
-  void _seg(Canvas c, double x0, double y0, double z0, double x1, double y1, double z1, Color color, double w) {
-    if (!project(x0, y0, z0)) return;
-    final ax = _px, ay = _py;
-    if (!project(x1, y1, z1)) return;
-    c.drawLine(Offset(ax, ay), Offset(_px, _py), _line(color, w * _ps));
-  }
-
-  // --------------------------------------------------------------- buildings
-
-  void _drawWall(Canvas canvas, int i, double fx, double fy) {
-    final w = game.sim.map.walls[i];
-    final b = _wallBuilding[i];
-    final bld = game.sim.map.buildings[b];
-    final inside = bld.contains(fx, fy);
-    final h = inside ? 22.0 : _heights[b];
-    final alpha = !inside && _occludesFocus(bld.rect.left, bld.rect.right, bld.rect.bottom, h, fx, fy) ? 0.4 : 1.0;
-    if (_cx > w.right) {
-      _faceX(canvas, w.right, w.top, w.bottom, 0, h, _wallSide[b].withValues(alpha: alpha));
-    } else if (_cx < w.left) {
-      _faceX(canvas, w.left, w.top, w.bottom, 0, h, _wallSide[b].withValues(alpha: alpha));
-    }
-    _faceY(canvas, w.left, w.right, w.bottom, 0, h, _wallFront[b].withValues(alpha: alpha));
-    if (_q >= 1 && !inside && w.width > 30 && project(w.center.dx, w.bottom, h * 0.5) && _ps > 0.42) {
-      _faceY(canvas, w.left, w.right, w.bottom, 0, h * 0.12, Color.fromRGBO(0, 0, 0, 0.18 * alpha));
-      if (_q >= 2) _wallDetail(canvas, bld, w, h, alpha, (w.bottom - bld.rect.bottom).abs() < 1);
-    }
-    _quad(
-      canvas,
-      w.left,
-      w.top,
-      h,
-      w.right,
-      w.top,
-      h,
-      w.right,
-      w.bottom,
-      h,
-      w.left,
-      w.bottom,
-      h,
-      _wallTop[b].withValues(alpha: alpha),
-    );
-  }
-
-  /// Windows, planks or shop shutters on a south-facing wall face.
-  void _wallDetail(Canvas c, Building bld, Rect w, double h, double alpha, bool isFront) {
-    final y = w.bottom + 0.5;
-    switch (bld.style) {
-      case 'kampung':
-      case 'forest':
-        for (var z = h * 0.18; z < h; z += 13) {
-          _seg(c, w.left, y, z, w.right, y, z, Color.fromRGBO(60, 35, 20, 0.35 * alpha), 1.4);
-        }
-      case 'town':
-        _faceY(c, w.left, w.right, y, h * 0.5, h * 0.56, bld.roofColor.withValues(alpha: 0.9 * alpha));
-      default:
-        break;
-    }
-    final n = (w.width / 70).floor();
-    if (n <= 0) return;
-    final gap = w.width / n;
-    final glass = Color.fromRGBO(170, 215, 240, alpha);
-    final frame = Color.fromRGBO(255, 255, 255, 0.85 * alpha);
-    final shine = Color.fromRGBO(255, 255, 255, 0.4 * alpha);
-    final storeys = bld.style == 'town' ? const [0.62, 0.22] : const [0.38];
-    for (var k = 0; k < n; k++) {
-      final cx = w.left + gap * (k + 0.5);
-      final ww = math.min(gap * 0.5, 30.0);
-      for (final z0 in storeys) {
-        final wz0 = h * z0, wz1 = h * (z0 + 0.25);
-        if (bld.style == 'town' && z0 < 0.5 && isFront) {
-          // Roller shutter on the shop floor.
-          _faceY(c, cx - ww * 0.7, cx + ww * 0.7, y, wz0 - h * 0.1, wz1, Color.fromRGBO(140, 150, 156, alpha));
-          _seg(
-            c,
-            cx - ww * 0.7,
-            y,
-            (wz0 + wz1) / 2,
-            cx + ww * 0.7,
-            y,
-            (wz0 + wz1) / 2,
-            Color.fromRGBO(90, 100, 106, 0.6 * alpha),
-            1.5,
-          );
-          continue;
-        }
-        _faceY(c, cx - ww / 2 - 2, cx + ww / 2 + 2, y, wz0 - 2, wz1 + 2, frame);
-        _faceY(c, cx - ww / 2, cx + ww / 2, y, wz0, wz1, glass);
-        _faceY(c, cx - ww / 2, cx - ww * 0.15, y, wz0 + (wz1 - wz0) * 0.5, wz1, shine);
-      }
-    }
-  }
-
-  void _drawRoof(Canvas canvas, int i, double fx, double fy) {
-    final Building b = game.sim.map.buildings[i];
-    final r = b.rect.inflate(7);
-    final h = _heights[i] + 1;
-    final ridge = h + math.min(r.width, r.height) * 0.28;
-    final alpha = _occludesFocus(r.left, r.right, r.bottom, ridge, fx, fy) ? 0.35 : 1.0;
-    final dark = _roofDark[i].withValues(alpha: alpha);
-    final light = _roofLight[i].withValues(alpha: alpha);
-    final base = b.roofColor.withValues(alpha: alpha);
-    final lines = Color.fromRGBO(0, 0, 0, 0.16 * alpha);
-    final corrugated = b.style == 'kampung' || b.style == 'plantation';
-    final step = corrugated ? 16.0 : 22.0;
-    final detail = _q >= 2;
-
-    if (r.width >= r.height) {
-      // Ridge runs east-west: north slope, gable ends, south slope.
-      final c = r.center.dy;
-      _quad(canvas, r.left, r.top, h, r.right, r.top, h, r.right, c, ridge, r.left, c, ridge, light);
-      if (_cx > r.right) _tri(canvas, r.right, r.top, h, r.right, r.bottom, h, r.right, c, ridge, dark);
-      if (_cx < r.left) _tri(canvas, r.left, r.top, h, r.left, r.bottom, h, r.left, c, ridge, dark);
-      _quad(canvas, r.left, c, ridge, r.right, c, ridge, r.right, r.bottom, h, r.left, r.bottom, h, base);
-      if (detail) {
-        if (corrugated) {
-          for (var x = r.left + step; x < r.right; x += step) {
-            _seg(canvas, x, c, ridge, x, r.bottom, h, lines, 2);
-          }
+      // Drawn as a polygon: a circle this close to the camera comes out
+      // lopsided once the ground plane transform is applied to its curves.
+      _path.reset();
+      const steps = 28;
+      for (var i = 0; i <= steps; i++) {
+        final a = i / steps * math.pi * 2;
+        final x = p.pos.x + math.cos(a) * 28 * pulse, y = p.pos.y + math.sin(a) * 28 * pulse;
+        if (i == 0) {
+          _path.moveTo(x, y);
         } else {
-          for (var k = 1; k < 4; k++) {
-            final t = k / 4;
-            final yy = c + (r.bottom - c) * t, zz = ridge + (h - ridge) * t;
-            _seg(canvas, r.left, yy, zz, r.right, yy, zz, lines, 1.6);
+          _path.lineTo(x, y);
+        }
+      }
+      canvas.drawPath(_path, _line(const Color(0xAA4FC3F7), 3));
+    }
+  }
+
+  // --------------------------------------------------------------- 3D meshes
+
+  late final ModelLibrary models = ModelLibrary(game.config, game.sim.map);
+  final TriangleBatch _tris = TriangleBatch(26000);
+  final TriangleBatch _shadowTris = TriangleBatch(4000);
+  Float32List _sx = Float32List(512), _sy = Float32List(512), _sw = Float32List(512);
+  Float32List _wx = Float32List(512), _wy = Float32List(512), _wz = Float32List(512);
+  final Map<int, double> _walkPhase = {};
+
+  double _fogNear = 1150, _fogFar = 2600;
+  static const double _fogMax = 0.82;
+
+  /// Projects one model instance into the triangle batch: transform, light,
+  /// back-face cull, fog, then queue for the depth-sorted draw.
+  void _emit(
+    Mesh m,
+    double px,
+    double py,
+    double pz, {
+    double yaw = 0,
+    double scale = 1,
+    double bend = 0,
+    double bendHeight = 80,
+    double kick = 0,
+    double alpha = 1,
+    double flash = 0,
+    double haze = 0,
+  }) {
+    final vc = m.vertexCount;
+    if (_sx.length < vc) {
+      _sx = Float32List(vc * 2);
+      _sy = Float32List(vc * 2);
+      _sw = Float32List(vc * 2);
+      _wx = Float32List(vc * 2);
+      _wy = Float32List(vc * 2);
+      _wz = Float32List(vc * 2);
+    }
+    final cs = math.cos(yaw), sn = math.sin(yaw);
+    final v = m.verts;
+    final tx = cam.targetX, ty = cam.targetY;
+    final nx0 = cam.nx, ny0 = cam.ny, nz0 = cam.nz;
+    final rx0 = cam.rx, ry0 = cam.ry;
+    final ux0 = cam.ux, uy0 = cam.uy, uz0 = cam.uz;
+    final f = cam.f, w2 = cam.w2, h0 = cam.h0, dist = cam.distance;
+    for (var i = 0; i < vc; i++) {
+      var lx = v[i * 3];
+      final ly = v[i * 3 + 1], lz = v[i * 3 + 2];
+      if (kick != 0 && lz < 16) lx += kick * (16 - lz) / 16;
+      if (bend != 0) lx += bend * (lz / bendHeight) * (lz / bendHeight);
+      final x = px + (lx * cs - ly * sn) * scale;
+      final y = py + (lx * sn + ly * cs) * scale;
+      final z = pz + lz * scale;
+      _wx[i] = x;
+      _wy[i] = y;
+      _wz[i] = z;
+      final dx = x - tx, dy = y - ty;
+      final w = dist - (dx * nx0 + dy * ny0 + z * nz0);
+      _sw[i] = w;
+      if (w < 20) continue;
+      _sx[i] = w2 + f * (dx * rx0 + dy * ry0) / w;
+      _sy[i] = h0 - f * (dx * ux0 + dy * uy0 + z * uz0) / w;
+    }
+    final eyeX = cam.eyeX, eyeY = cam.eyeY, eyeZ = cam.eyeZ;
+    final t = m.tris, n = m.normals, col = m.colors;
+    final tc = m.triCount;
+    final fog = light.fog;
+    final fogR = ((fog.toARGB32() >> 16) & 0xFF).toDouble();
+    final fogG = ((fog.toARGB32() >> 8) & 0xFF).toDouble();
+    final fogB = (fog.toARGB32() & 0xFF).toDouble();
+    for (var k = 0; k < tc; k++) {
+      final a = t[k * 3], b = t[k * 3 + 1], c = t[k * 3 + 2];
+      final wa = _sw[a], wb = _sw[b], wc = _sw[c];
+      if (wa < 20 || wb < 20 || wc < 20) continue;
+      final onx = n[k * 3], ony = n[k * 3 + 1], nz = n[k * 3 + 2];
+      final nx = onx * cs - ony * sn, ny = onx * sn + ony * cs;
+      final mx = (_wx[a] + _wx[b] + _wx[c]) / 3,
+          my = (_wy[a] + _wy[b] + _wy[c]) / 3,
+          mz = (_wz[a] + _wz[b] + _wz[c]) / 3;
+      if (nx * (eyeX - mx) + ny * (eyeY - my) + nz * (eyeZ - mz) <= 0) continue; // faces away
+      final depth = (wa + wb + wc) / 3;
+      final diffuse = math.max(0.0, nx * light.lx + ny * light.ly + nz * light.lz);
+      final sky = 0.1 * math.max(0.0, nz);
+      final base = col[k];
+      var r = ((base >> 16) & 0xFF) * (light.ar + light.dr * diffuse + sky);
+      var gr = ((base >> 8) & 0xFF) * (light.ag + light.dg * diffuse + sky);
+      var bl = (base & 0xFF) * (light.ab + light.db * diffuse + sky);
+      if (flash > 0) {
+        r += (255 - r) * flash;
+        gr += (255 - gr) * flash;
+        bl += (255 - bl) * flash;
+      }
+      if (haze > 0) {
+        r += (150 - r) * haze;
+        gr += (115 - gr) * haze;
+        bl += (80 - bl) * haze;
+      }
+      final fogK = ((depth - _fogNear) / (_fogFar - _fogNear)).clamp(0.0, _fogMax);
+      if (fogK > 0) {
+        r += (fogR - r) * fogK;
+        gr += (fogG - gr) * fogK;
+        bl += (fogB - bl) * fogK;
+      }
+      final al = ((base >> 24) & 0xFF) * alpha;
+      final argb =
+          (al.round().clamp(0, 255) << 24) |
+          (r.round().clamp(0, 255) << 16) |
+          (gr.round().clamp(0, 255) << 8) |
+          bl.round().clamp(0, 255);
+      _tris.add(_sx[a], _sy[a], _sx[b], _sy[b], _sx[c], _sy[c], argb, depth);
+    }
+  }
+
+  final Float32List _shq = Float32List(8);
+  static const List<(double, double)> _unitCorners = [(-1, -1), (1, -1), (1, 1), (-1, 1)];
+
+  /// A cast shadow for an upright object: its footprint flattened onto the
+  /// ground along the shadow direction. One quad, so nothing double-darkens.
+  void _castShadow(double x, double y, double halfX, double halfY, double height, double yaw, double alpha) {
+    final ox = Lighting.shadowX * height, oy = Lighting.shadowY * height;
+    final cs = math.cos(yaw), sn = math.sin(yaw);
+    for (var k = 0; k < 4; k++) {
+      final lx = _unitCorners[k].$1 * halfX, ly = _unitCorners[k].$2 * halfY;
+      if (!cam.project(x + lx * cs - ly * sn + ox, y + lx * sn + ly * cs + oy, 0)) return;
+      _shq[k * 2] = cam.px;
+      _shq[k * 2 + 1] = cam.py;
+    }
+    final c = _argb(alpha, 0);
+    final depth = cam.depthOf(x + ox, y + oy, 0);
+    _shadowTris.add(_shq[0], _shq[1], _shq[2], _shq[3], _shq[4], _shq[5], c, depth);
+    _shadowTris.add(_shq[0], _shq[1], _shq[4], _shq[5], _shq[6], _shq[7], c, depth);
+  }
+
+  bool _inView(Rect cull, double x, double y) => x > cull.left && x < cull.right && y > cull.top && y < cull.bottom;
+
+  /// Everything that stands up: buildings, voxels, nature, characters, trees,
+  /// loot and shots.
+  void _emitWorld(Rect cull) {
+    final sim = game.sim;
+    final map = sim.map;
+    final f = sim.focus.pos;
+    final t = game.clock;
+    _fogNear = cam.distance * 0.92;
+    _fogFar = cam.distance * (1.6 + 1.9 / math.max(0.25, cam.sinT));
+    final meshShadows = _q >= 3;
+
+    for (var i = 0; i < map.buildings.length; i++) {
+      final b = map.buildings[i];
+      if (!b.rect.overlaps(cull)) continue;
+      final inside = b.contains(f.x, f.y);
+      final h = ModelLibrary.wallHeight(b);
+      final hide = !inside && _occludesFocus(b.rect.left, b.rect.right, b.rect.bottom, h, f.x, f.y);
+      final alpha = hide ? 0.38 : 1.0;
+      _emit(inside ? models.buildingLow[i] : models.buildingFull[i], 0, 0, 0, alpha: alpha);
+      if (!inside) _emit(models.roofs[i], 0, 0, 0, alpha: hide ? 0.3 : 1.0);
+    }
+
+    // The voxel layer.
+    voxels.emit(
+      world: sim.blocks,
+      cam: cam,
+      out: _tris,
+      cull: cull,
+      light: light,
+      quality: _q,
+      shadows: _q >= 2 ? _shadowTris : null,
+      glows: _overlayGlows,
+    );
+
+    for (var i = 0; i < map.obstacles.length; i++) {
+      final o = map.obstacles[i];
+      if (!_inView(cull, o.x, o.y)) continue;
+      final near = (o.x - f.x).abs() < o.r * 2 + 20 && o.y > f.y && o.y - f.y < 110;
+      final alpha = near ? 0.4 : 1.0;
+      // Cube models must stay axis aligned, so yaw snaps to quarter turns.
+      final quarter = (((o.x + o.y) / 71).floor() % 4) * (math.pi / 2);
+      switch (o.kind) {
+        case 'tree':
+          final far = _q <= 1 || cam.depthOf(o.x, o.y, 0) > cam.distance * 1.25;
+          final set = far ? models.treesLow : models.trees;
+          _emit(set[i & 3], o.x, o.y, 0, yaw: quarter, scale: o.r / ModelLibrary.treeRef, alpha: alpha);
+        case 'rock':
+          _emit(models.rocks[i % 3], o.x, o.y, 0, yaw: quarter, scale: o.r / ModelLibrary.rockRef, alpha: alpha);
+        default:
+          final sway = math.sin(t * 1.4 + o.x * 0.05) * 5;
+          _emit(models.palm, o.x, o.y, 0, yaw: o.x * 0.01, scale: o.r / 14, bend: sway, bendHeight: 78, alpha: alpha);
+      }
+    }
+
+    for (final tr in sim.trees) {
+      if (!tr.alive || !_inView(cull, tr.x, tr.y)) continue;
+      final r = game.config.trees.trunkRadius[tr.stage];
+      _emit(
+        models.sapling,
+        tr.x,
+        tr.y,
+        0,
+        yaw: (tr.x * 0.02).roundToDouble() * math.pi / 2,
+        scale: r * 1.15,
+        flash: tr.hitFlash > 0 ? 0.7 : 0,
+      );
+    }
+
+    for (final a in sim.actors) {
+      if (!a.alive || !_inView(cull, a.pos.x, a.pos.y)) continue;
+      final color = a.isPlayer && game.playerSkin < game.config.progression.skins.length
+          ? game.config.progression.skins[game.playerSkin].color
+          : a.color;
+      final moving = a.vel.length2 > 100;
+      final phase = _walkPhase[a.id] = (_walkPhase[a.id] ?? 0) + (moving ? 0.25 : 0);
+      final swing = moving ? math.sin(phase) * 6 : 0.0;
+      final bob = moving ? math.sin(phase * 2).abs() * 1.5 : 0.0;
+      final flash = a.hitFlash > 0 ? 0.75 : 0.0;
+      final inHaze = !sim.isSafeAt(a.pos.x, a.pos.y) ? 0.25 : 0.0;
+      final yaw = a.aimAngle;
+      final mining = a.action == ActorAction.mining;
+      // Mining swings the arms: a short forward jab on every blow.
+      final swingArm = mining ? math.sin(a.actionTime / math.max(0.08, a.actionDuration) * math.pi * 3) * 10 : 0.0;
+      _emit(models.leg(color, left: true), a.pos.x, a.pos.y, 0, yaw: yaw, kick: swing, flash: flash, haze: inHaze);
+      _emit(models.leg(color, left: false), a.pos.x, a.pos.y, 0, yaw: yaw, kick: -swing, flash: flash, haze: inHaze);
+      if (meshShadows) _castShadow(a.pos.x, a.pos.y, 13, 10.5, 46, yaw, 0.3);
+      _emit(
+        models.upper(color, detail: _q >= 2),
+        a.pos.x,
+        a.pos.y,
+        bob,
+        yaw: yaw,
+        flash: flash,
+        haze: inHaze,
+        bend: swingArm,
+        bendHeight: 40,
+      );
+      if (a.armour > 0) _emit(models.vest, a.pos.x, a.pos.y, bob, yaw: yaw, flash: flash);
+      if (a.hazeShield > 0) _emit(models.mask, a.pos.x, a.pos.y, bob, yaw: yaw);
+      if (mining) {
+        _emit(models.pickaxe, a.pos.x, a.pos.y, bob, yaw: yaw, bend: swingArm, bendHeight: 40);
+      } else {
+        final w = a.weapon;
+        if (w != null) {
+          _emit(models.gun(w.stats), a.pos.x, a.pos.y, bob, yaw: yaw, flash: flash);
+          if (game.sim.time - game.lastShot[a.id] < 0.08) {
+            final len = 40.0 + w.stats.rank * 6;
+            if (project(a.pos.x + math.cos(yaw) * len, a.pos.y + math.sin(yaw) * len, 27)) {
+              _overlayGlows.add(Sprites.glow, _px, _py, 44 * _ps, w.stats.color.toARGB32());
+            }
           }
         }
       }
-      _seg(canvas, r.left, c, ridge + 1, r.right, c, ridge + 1, dark, 4);
-      _seg(canvas, r.left, r.bottom, h, r.right, r.bottom, h, dark, 3);
-    } else {
-      // Ridge runs north-south: far slope first, then the near one, then the south gable.
-      final c = r.center.dx;
-      void west() => _quad(canvas, r.left, r.top, h, c, r.top, ridge, c, r.bottom, ridge, r.left, r.bottom, h, light);
-      void east() => _quad(canvas, c, r.top, ridge, r.right, r.top, h, r.right, r.bottom, h, c, r.bottom, ridge, base);
-      if (_cx > c) {
-        west();
-        east();
-      } else {
-        east();
-        west();
+    }
+
+    for (final l in sim.loot) {
+      if (l.taken || !_inView(cull, l.x, l.y)) continue;
+      final bob = 14 + math.sin(t * 3 + l.x * 0.1) * 4;
+      _emit(models.loot(l.refId), l.x, l.y, bob, yaw: t * 1.8 + l.x * 0.05, scale: 1.1);
+    }
+
+    for (final p in sim.projectiles.items) {
+      if (!p.active || !_inView(cull, p.x, p.y)) continue;
+      final w = p.weapon;
+      _emit(models.shot(w.color), p.x, p.y, 27, scale: w.projectileRadius * 1.2);
+      if (project(p.x, p.y, 27)) {
+        _overlayGlows.add(Sprites.glow, _px, _py, w.projectileRadius * 6 * _ps, _argb(0.75, w.color.toARGB32()));
       }
-      if (detail) {
-        for (var y = r.top + step; y < r.bottom; y += step) {
-          _seg(canvas, r.left, y, h, c, y, ridge, lines, 1.4);
-          _seg(canvas, c, y, ridge, r.right, y, h, lines, 1.4);
-        }
+      if (project(p.x - p.vx * 0.03, p.y - p.vy * 0.03, 27)) {
+        _overlayTinted.add(Sprites.dot, _px, _py, w.projectileRadius * 1.4 * _ps, _argb(0.35, w.color.toARGB32()));
       }
-      _tri(canvas, r.left, r.bottom, h, r.right, r.bottom, h, c, r.bottom, ridge, dark);
-      _seg(canvas, c, r.top, ridge + 1, c, r.bottom, ridge + 1, dark, 4);
     }
   }
 
-  // --------------------------------------------------------------- nature
-
-  void _drawObstacle(Canvas canvas, int i, double fx, double fy) {
-    final o = game.sim.map.obstacles[i];
-    final near = (o.x - fx).abs() < o.r * 2 + 20 && o.y > fy && o.y - fy < 110;
-    final a = near ? 0.45 : 1.0;
-    switch (o.kind) {
-      case 'tree':
-        const trunkH = 34.0;
-        _seg(canvas, o.x, o.y, 0, o.x, o.y, trunkH, Color.fromRGBO(93, 64, 55, a), 8);
-        if (project(o.x, o.y, trunkH + o.r * 0.9)) {
-          _blit(canvas, Sprites.canopy, _px, _py, o.r * 3.6 * _ps, alpha: a);
-        }
-      case 'palm':
-        const h = 78.0;
-        final sway = math.sin(game.clock * 1.4 + o.x * 0.05) * 4;
-        _seg(canvas, o.x, o.y, 0, o.x + 3 + sway * 0.25, o.y, h * 0.5, Color.fromRGBO(130, 92, 64, a), 6);
-        _seg(canvas, o.x + 3 + sway * 0.25, o.y, h * 0.5, o.x + 8 + sway, o.y, h, Color.fromRGBO(110, 78, 64, a), 5.5);
-        if (project(o.x + 8 + sway, o.y, h - 6)) {
-          final rot = o.x * 0.01 + math.sin(game.clock * 1.6 + o.y * 0.02) * 0.06;
-          _blit(canvas, Sprites.palmCrown, _px, _py, o.r * 6.2 * _ps, alpha: a, rot: rot);
-        }
-      default:
-        if (project(o.x, o.y, o.r * 0.35)) _blit(canvas, Sprites.rock, _px, _py, o.r * 2.2 * _ps, alpha: a);
-    }
+  /// Wireframe box on the column the player is about to mine or build on.
+  void _drawBlockTarget(Canvas canvas) {
+    final sim = game.sim;
+    final p = sim.player;
+    if (!p.alive || p.brain != null || !game.showBlockTarget) return;
+    final (bx, by) = sim.targetColumn(p);
+    final has = sim.blocks.height(bx, by) > 0;
+    final placing = !has || !game.buildMode;
+    if (!has && p.carried(p.selected) <= 0) return;
+    _outline.color = has && game.buildMode ? const Color(0xCCFFF59D) : const Color(0xAAFFFFFF);
+    voxels.drawTarget(canvas, cam, sim.blocks, bx, by, _outline, placing: placing && !has);
   }
 
-  void _drawTree(Canvas canvas, int i) {
-    final t = game.sim.trees[i];
-    final tr = game.config.trees.trunkRadius[t.stage];
-    final h = 14.0 + tr * 2.2;
-    _seg(canvas, t.x, t.y, 0, t.x, t.y, h, const Color(0xFF6D4C41), tr * 0.6);
-    if (!project(t.x, t.y, h + tr * 1.4)) return;
-    final size = tr * 5.6 * _ps;
-    _blit(canvas, Sprites.sapling, _px, _py, size);
-    if (t.hitFlash > 0) canvas.drawCircle(Offset(_px, _py), size * 0.36, _fill(const Color(0xAAFFFFFF)));
-    if (t.health < t.maxHealth && project(t.x, t.y, h + tr * 3.8)) {
-      _bar(canvas, _px, _py, t.health / t.maxHealth, const Color(0xFF66BB6A));
+  /// Health bars and action rings, drawn on top of the 3D scene.
+  void _drawLabels(Canvas canvas) {
+    final sim = game.sim;
+    for (final a in sim.actors) {
+      if (!a.alive) continue;
+      if (a.busy && project(a.pos.x, a.pos.y, 26)) {
+        final color = switch (a.action) {
+          ActorAction.planting => const Color(0xFF66BB6A),
+          ActorAction.mining => const Color(0xFFFFCA28),
+          _ => const Color(0xFF4FC3F7),
+        };
+        canvas.drawArc(
+          Rect.fromCircle(center: Offset(_px, _py), radius: 30 * _ps),
+          -math.pi / 2,
+          math.pi * 2 * a.actionProgress,
+          false,
+          _line(color, 5 * _ps),
+        );
+      }
+      if (!a.isPlayer && sim.time - a.lastDamageTime < 3 && project(a.pos.x, a.pos.y, 62)) {
+        _bar(canvas, _px, _py, a.health / a.maxHealth, const Color(0xFFEF5350));
+      }
+    }
+    for (final t in sim.trees) {
+      if (!t.alive || t.health >= t.maxHealth) continue;
+      final r = game.config.trees.trunkRadius[t.stage];
+      if (project(t.x, t.y, r * 7)) _bar(canvas, _px, _py, t.health / t.maxHealth, const Color(0xFF66BB6A));
     }
   }
 
@@ -676,95 +652,6 @@ class PerspectiveRenderer {
     final w = 40 * _ps, h = math.max(3.0, 5 * _ps);
     canvas.drawRect(Rect.fromLTWH(x - w / 2 - 1, y - 1, w + 2, h + 2), _fill(const Color(0xAA000000)));
     canvas.drawRect(Rect.fromLTWH(x - w / 2, y, w * frac.clamp(0, 1), h), _fill(color));
-  }
-
-  // --------------------------------------------------------------- characters
-
-  void _drawActor(Canvas canvas, Actor a) {
-    const r = Actor.radius;
-    const z = r;
-    final cos = math.cos(a.aimAngle), sin = math.sin(a.aimAngle);
-    final w = a.weapon;
-    final behind = sin < 0; // aiming away from the camera: gun is behind the body
-    final skin = Color.lerp(a.color, const Color(0xFFFFE0B2), 0.55)!;
-
-    void gun() {
-      if (w != null) {
-        final len = 18.0 + w.stats.rank * 5;
-        final width = 6.0 + w.stats.rank * 2;
-        final ex = a.pos.x + cos * (r + len), ey = a.pos.y + sin * (r + len);
-        _seg(canvas, a.pos.x + cos * 6, a.pos.y + sin * 6, z - 1, ex, ey, z - 1, w.stats.color, width);
-        if (project(a.pos.x + cos * (r + 4), a.pos.y + sin * (r + 4), z + 6)) {
-          canvas.drawCircle(
-            Offset(_px, _py),
-            (5 + w.stats.rank * 1.5) * _ps,
-            _fill(Color.lerp(w.stats.color, const Color(0xFFFFFFFF), 0.45)!),
-          );
-        }
-        if (game.sim.time - game.lastShot[a.id] < 0.08 && project(ex + cos * 6, ey + sin * 6, z - 1)) {
-          _overlayGlows.add(Sprites.glow, _px, _py, 40 * _ps, w.stats.color.toARGB32());
-        }
-      }
-      for (final side in const [-1.0, 1.0]) {
-        if (project(a.pos.x + cos * r * 0.9 - sin * 9 * side, a.pos.y + sin * r * 0.9 + cos * 9 * side, z - 3)) {
-          canvas.drawCircle(Offset(_px, _py), 6 * _ps, _fill(skin));
-        }
-      }
-    }
-
-    if (behind) gun();
-    if (!project(a.pos.x, a.pos.y, z)) return;
-    final o = Offset(_px, _py);
-    final ps = _ps;
-    final rr = r * ps;
-    final bodyIndex = a.isPlayer ? 0 : 1 + (a.id - 1) % 8;
-    _blit(canvas, Sprites.body(bodyIndex), o.dx, o.dy, rr * 2 / 0.84);
-    if (a.hitFlash > 0) canvas.drawCircle(o, rr, _fill(const Color(0xCCFFFFFF)));
-    if (a.armour > 0) {
-      canvas.drawCircle(
-        o,
-        rr - 3 * ps,
-        _line(a.vest?.tier == 2 ? const Color(0xFF1565C0) : const Color(0xFF90CAF9), 4 * ps),
-      );
-    }
-    if (a.hazeShield > 0) {
-      canvas.drawRect(
-        Rect.fromCenter(center: o.translate(0, rr * 0.3), width: 16 * ps, height: 7 * ps),
-        _fill(const Color(0xFFECEFF1)),
-      );
-    }
-    if (!behind) gun();
-    if (a.busy) {
-      final color = a.action == ActorAction.planting ? const Color(0xFF66BB6A) : const Color(0xFF4FC3F7);
-      canvas.drawArc(
-        Rect.fromCircle(center: o, radius: rr + 8 * ps),
-        -math.pi / 2,
-        math.pi * 2 * a.actionProgress,
-        false,
-        _line(color, 5 * ps),
-      );
-    }
-    if (!a.isPlayer && game.sim.time - a.lastDamageTime < 3 && project(a.pos.x, a.pos.y, z + r + 22)) {
-      _bar(canvas, _px, _py, a.health / a.maxHealth, const Color(0xFFEF5350));
-    }
-  }
-
-  void _drawProjectile(Canvas canvas, int i) {
-    final p = game.sim.projectiles.items[i];
-    final w = p.weapon;
-    if (!project(p.x - p.vx * 0.03, p.y - p.vy * 0.03, 16)) return;
-    final tx = _px, ty = _py;
-    if (!project(p.x, p.y, 16)) return;
-    final pr = w.projectileRadius * _ps;
-    canvas.drawLine(Offset(tx, ty), Offset(_px, _py), _line(w.color.withValues(alpha: 0.4), pr * 1.6));
-    canvas.drawCircle(Offset(_px, _py), pr, _fill(w.color));
-    _overlayGlows.add(Sprites.glow, _px, _py, pr * 6, _argb(0.8, w.color.toARGB32()));
-  }
-
-  void _drawLoot(Canvas canvas, int i) {
-    final l = game.sim.loot[i];
-    final bob = 12 + math.sin(game.clock * 3 + l.x * 0.1) * 4;
-    if (project(l.x, l.y, bob)) _blit(canvas, Sprites.loot(Sprites.lootIcon(l.refId)), _px, _py, 36 * _ps);
   }
 
   // --------------------------------------------------------------- particles
@@ -788,6 +675,8 @@ class PerspectiveRenderer {
           _overlayGlows.add(Sprites.glow, _px, _py, p.size * 4 * s, _argb(t, p.color));
         case FxKind.muzzle:
           _overlayGlows.add(Sprites.glow, _px, _py, p.size * 3 * s, _argb(t, p.color));
+        case FxKind.cube:
+          _overlayTinted.add(Sprites.cube, _px, _py, p.size * 2.4 * s, _argb(math.min(1, t * 2.2), p.color), p.spin);
       }
     }
   }
@@ -797,9 +686,9 @@ class PerspectiveRenderer {
   static final _hazePaint = Paint()..color = const Color(0x99A8784A);
   static const _hazeEdge = 0x9C7A55;
 
-  /// Haze outside the safe circle and the tree bubbles, as one path (no
+  /// Haze outside the safe circle and the clean-air bubbles, as one path (no
   /// offscreen layer, which is expensive on phones).
-  void _drawHaze(Canvas canvas, Rect visible) {
+  void _drawHaze(Canvas canvas, Rect visible, double skyLine) {
     final z = game.sim.zone;
     final fx = math.max((visible.left - z.cx).abs(), (visible.right - z.cx).abs());
     final fy = math.max((visible.top - z.cy).abs(), (visible.bottom - z.cy).abs());
@@ -815,8 +704,18 @@ class PerspectiveRenderer {
       final b = Rect.fromCircle(center: Offset(t.x, t.y), radius: t.bubble);
       if (b.overlaps(area)) _path2.addOval(b);
     }
+    final blocks = game.sim.blocks;
+    for (final col in blocks.filters) {
+      final bx = BlockWorld.keyX(col), by = BlockWorld.keyY(col);
+      final ty = blocks.top(bx, by);
+      final r = ty?.bubble ?? 0;
+      if (r <= 0) continue;
+      final b = Rect.fromCircle(center: Offset(blocks.wx(bx), blocks.wy(by)), radius: r);
+      if (b.overlaps(area)) _path2.addOval(b);
+    }
     canvas.save();
-    canvas.transform(_m);
+    canvas.clipRect(Rect.fromLTRB(0, skyLine, game.viewW, game.viewH));
+    canvas.transform(cam.matrix);
     canvas.drawPath(Path.combine(PathOperation.difference, _path, _path2), _hazePaint);
     if (z.r > 0) canvas.drawCircle(Offset(z.cx, z.cy), z.r + 18, _line(const Color(0x33A8784A), 36));
     canvas.restore();
@@ -837,6 +736,7 @@ class PerspectiveRenderer {
       final x0 = z.cx + math.cos(a0) * z.r, y0 = z.cy + math.sin(a0) * z.r;
       final x1 = z.cx + math.cos(a1) * z.r, y1 = z.cy + math.sin(a1) * z.r;
       if (!cull.contains(Offset(x0, y0)) && !cull.contains(Offset(x1, y1))) continue;
+      if (cam.depthOf(x0, y0, 0) < cam.distance * 0.25) continue; // nearly edge-on: it would smear
       if (!project(x0, y0, 0)) continue;
       final b0 = Offset(_px, _py);
       if (!project(x1, y1, 0)) continue;
@@ -883,9 +783,9 @@ class PerspectiveRenderer {
     final sim = g.sim;
     if (sim.phase == MatchPhase.dropping) return;
 
-    if (_q >= 1) {
+    if (_q >= 1 && sim.hazeActive) {
       // The far (top) part of the view fades into hazy air, thicker each phase.
-      final strength = (0.22 + 0.06 * sim.zone.phaseIndex).clamp(0.0, 0.5);
+      final strength = (0.18 + 0.06 * sim.zone.phaseIndex).clamp(0.0, 0.45);
       if (_vignetteFor != strength || _vignette == null) {
         _vignetteFor = strength;
         _vignette = Paint()
@@ -906,7 +806,7 @@ class PerspectiveRenderer {
 
     final p = sim.player;
     if (!p.alive || sim.phase != MatchPhase.running) return;
-    final inHaze = !sim.isSafeAt(p.pos.x, p.pos.y);
+    final inHaze = sim.hazeActive && !sim.isSafeAt(p.pos.x, p.pos.y);
     if (!inHaze && g.hurtTimer <= 0) return;
     final color = g.hurtTimer > 0 ? const Color(0x88D32F2F) : const Color(0x998D6E3A);
     canvas.drawRect(

@@ -14,6 +14,7 @@ import '../../data/game_config.dart';
 import '../../game/components/actor.dart';
 import '../../game/haze_royale_game.dart';
 import '../../game/systems/match_manager.dart';
+import '../../game/ui/build_bar.dart';
 import '../../game/ui/drop_overlay.dart';
 import '../../game/ui/hud.dart';
 import '../../game/ui/joystick.dart';
@@ -22,7 +23,10 @@ import '../../services/feedback_service.dart';
 import '../../state/providers.dart';
 
 class GameScreen extends ConsumerWidget {
-  const GameScreen({super.key});
+  const GameScreen({super.key, this.mode = GameMode.royale});
+
+  /// Royale match or the Blok Craft sandbox.
+  final GameMode mode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -30,7 +34,7 @@ class GameScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: const Color(0xFF0D1B2A),
       body: config.when(
-        data: (c) => _Match(config: c),
+        data: (c) => _Match(config: c, mode: mode),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(
           child: Text('$e', style: const TextStyle(color: Colors.white)),
@@ -41,8 +45,9 @@ class GameScreen extends ConsumerWidget {
 }
 
 class _Match extends ConsumerStatefulWidget {
-  const _Match({required this.config});
+  const _Match({required this.config, required this.mode});
   final GameConfig config;
+  final GameMode mode;
 
   @override
   ConsumerState<_Match> createState() => _MatchState();
@@ -54,10 +59,14 @@ class _MatchState extends ConsumerState<_Match> {
   final Set<LogicalKeyboardKey> _keys = {};
   PlayerResult? _result;
   bool _spectating = false;
+  bool _stickPush = false;
   int _tutorialStep = -1;
   Timer? _tutorialTimer;
 
-  static const _tutorial = ['tut_move', 'tut_aim', 'tut_loot', 'tut_haze', 'tut_plant'];
+  static const _tutorialRoyale = ['tut_move', 'tut_aim', 'tut_loot', 'tut_haze', 'tut_plant', 'tut_build'];
+  static const _tutorialCraft = ['tut_move', 'tut_camera', 'tut_build', 'tut_craft', 'tut_plant'];
+
+  List<String> get _tutorial => widget.mode == GameMode.craft ? _tutorialCraft : _tutorialRoyale;
 
   @override
   void initState() {
@@ -69,8 +78,14 @@ class _MatchState extends ConsumerState<_Match> {
       lang: settings.language,
       feedback: FeedbackService(hapticsEnabled: settings.haptics, audio: ref.read(audioServiceProvider)),
       aimSensitivity: settings.sensitivity,
+      playerSkin: ref.read(progressProvider).skin,
       playerName: account?.displayName ?? (settings.language == 'ms' ? 'Anda' : 'You'),
+      mode: widget.mode,
+      graphics: settings.graphics,
+      cameraFollow: settings.cameraFollow,
+      cameraTilt: settings.cameraTilt,
     );
+    game.buildMode = widget.mode == GameMode.craft;
     game.onPlayerFinishedCallback = _onPlayerFinished;
     game.phase.addListener(_onPhase);
     _audio = ref.read(audioServiceProvider)..music('music_match');
@@ -135,12 +150,30 @@ class _MatchState extends ConsumerState<_Match> {
       if (k == LogicalKeyboardKey.digit1) sim.startAction(sim.player, ActorAction.healing);
       if (k == LogicalKeyboardKey.digit2) sim.startAction(sim.player, ActorAction.masking);
       if (k == LogicalKeyboardKey.keyF) sim.startAction(sim.player, ActorAction.planting);
+      if (k == LogicalKeyboardKey.keyB) setState(() => game.buildMode = !game.buildMode);
+      if (k == LogicalKeyboardKey.keyV || k == LogicalKeyboardKey.space) game.placeBlock();
+      if (k == LogicalKeyboardKey.keyX) game.mineHeld = true;
+      if (k == LogicalKeyboardKey.keyC) _openCraft();
+      if (k == LogicalKeyboardKey.keyZ) game.recentreCamera();
+      if (k == LogicalKeyboardKey.comma) game.cycleBlock(-1);
+      if (k == LogicalKeyboardKey.period) game.cycleBlock(1);
     } else if (e is KeyUpEvent) {
       _keys.remove(e.logicalKey);
       if (e.logicalKey == LogicalKeyboardKey.keyF && sim.player.action == ActorAction.planting) {
         sim.player.cancelAction();
       }
+      if (e.logicalKey == LogicalKeyboardKey.keyX) {
+        game.mineHeld = false;
+        sim.player.wantMine = false;
+      }
     }
+    // Arrow keys orbit the camera.
+    var oy = 0.0, ox = 0.0;
+    if (_keys.contains(LogicalKeyboardKey.arrowLeft)) ox -= 6;
+    if (_keys.contains(LogicalKeyboardKey.arrowRight)) ox += 6;
+    if (_keys.contains(LogicalKeyboardKey.arrowUp)) oy -= 4;
+    if (_keys.contains(LogicalKeyboardKey.arrowDown)) oy += 4;
+    if (ox != 0 || oy != 0) game.orbitCamera(ox, oy);
     var x = 0.0, y = 0.0;
     if (_keys.contains(LogicalKeyboardKey.keyA)) x -= 1;
     if (_keys.contains(LogicalKeyboardKey.keyD)) x += 1;
@@ -161,12 +194,16 @@ class _MatchState extends ConsumerState<_Match> {
 
   // ---------------- UI ----------------
 
+  void _openCraft() {
+    showDialog<void>(context: context, builder: (ctx) => CraftSheet(game: game));
+  }
+
   void _pause() {
     final s = S.of(context);
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(s('quit_confirm')),
+        title: Text(s(widget.mode == GameMode.craft ? 'leave_craft' : 'quit_confirm')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s('cancel'))),
           FilledButton(
@@ -244,14 +281,36 @@ class _MatchState extends ConsumerState<_Match> {
                     onChanged: (v) {
                       final a = Offset(v.dx, v.dy) * settings.sensitivity;
                       game.aimInput.setValues(a.dx, a.dy);
-                      game.fireHeld = v.distance > 0.55;
+                      final push = v.distance > 0.55;
+                      if (game.buildMode) {
+                        if (push && !_stickPush) game.placeBlock();
+                        _stickPush = push;
+                      } else {
+                        game.fireHeld = push;
+                      }
                     },
                   ),
                 ),
                 Positioned(
                   right: safe.right + stickBox + 6 * k,
                   bottom: safe.bottom,
-                  child: ActionButtons(game: game, size: buttonSize),
+                  child: ValueListenableBuilder<int>(
+                    valueListenable: game.hudTick,
+                    builder: (context, _, _) => Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        BuildButtons(game: game, size: buttonSize, onCraft: _openCraft),
+                        SizedBox(height: buttonSize * 0.18),
+                        ActionButtons(game: game, size: buttonSize, minimal: game.buildMode),
+                      ],
+                    ),
+                  ),
+                ),
+                // Camera orbit pad, just above the aim stick.
+                Positioned(
+                  right: safe.right + stickBox * 0.22,
+                  bottom: safe.bottom + stickBox + 4 * k,
+                  child: LookPad(game: game, size: (buttonSize * 0.95).clamp(34.0, 56.0)),
                 ),
                 Positioned(
                   left: 0,

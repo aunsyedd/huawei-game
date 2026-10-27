@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../systems/match_manager.dart';
+import '../world/block_world.dart';
 
 /// Island overview: areas, buildings, haze circles, trees and the player.
 /// Also used full-screen for picking a landing spot.
@@ -64,6 +65,17 @@ class MinimapPainter extends CustomPainter {
         ..color = const Color(0xFFFF8A3D)
         ..strokeWidth = 2.5 / s;
       canvas.drawCircle(Offset(z.cx, z.cy), z.r, stroke);
+
+      // Block columns, in their own colour, so you can see what you built.
+      final blocks = sim.blocks;
+      final bs = blocks.size;
+      for (final e in blocks.heights.entries) {
+        final bx = BlockWorld.keyX(e.key), by = BlockWorld.keyY(e.key);
+        final t = blocks.top(bx, by);
+        if (t == null) continue;
+        p.color = t.top;
+        canvas.drawRect(Rect.fromLTWH(bx * bs, by * bs, bs, bs), p);
+      }
 
       p.color = const Color(0xFF43A047);
       for (final t in sim.trees) {

@@ -124,6 +124,141 @@ class S {
       'ms': 'Pengembara Jerebu (30 s dalam jerebu dan menang)',
     },
     'rotate_device': {'en': 'Turn your phone sideways to play', 'ms': 'Pusingkan telefon anda ke sisi untuk bermain'},
+    'level': {'en': 'Level {n}', 'ms': 'Tahap {n}'},
+    'xp_progress': {'en': '{a} / {b} XP', 'ms': '{a} / {b} XP'},
+    'streak': {'en': '{n}-day streak', 'ms': 'Rentetan {n} hari'},
+    'daily_bonus': {'en': 'Daily bonus +{xp} XP ({n}-day streak)', 'ms': 'Bonus harian +{xp} XP (rentetan {n} hari)'},
+    'missions': {'en': 'Daily missions', 'ms': 'Misi harian'},
+    'locker': {'en': 'Locker', 'ms': 'Loker'},
+    'locker_hint': {
+      'en': 'Pick your colour. Level up to unlock more.',
+      'ms': 'Pilih warna anda. Naik tahap untuk membuka lagi.',
+    },
+    'skin_locked': {'en': 'Level {n}', 'ms': 'Tahap {n}'},
+    'xp_gained': {'en': '+{xp} XP', 'ms': '+{xp} XP'},
+    'level_up': {'en': 'Level up! You are now level {n}', 'ms': 'Naik tahap! Anda kini tahap {n}'},
+    'mission_done': {'en': 'Mission complete: {m}', 'ms': 'Misi selesai: {m}'},
+    'new_skin': {'en': 'New skin unlocked: {s}', 'ms': 'Kulit baharu dibuka: {s}'},
+    'close': {'en': 'Close', 'ms': 'Tutup'},
+    'story': {'en': 'Story', 'ms': 'Cerita'},
+    'how_to_play': {'en': 'How to play', 'ms': 'Cara bermain'},
+    'skip': {'en': 'Skip', 'ms': 'Langkau'},
+    'next': {'en': 'Next', 'ms': 'Seterusnya'},
+    'lets_go': {'en': "Let's go!", 'ms': 'Jom!'},
+    'story_1_title': {'en': 'The haze returns', 'ms': 'Jerebu kembali'},
+    'story_1': {
+      'en': 'Forest and peat fires burn across the region. Thick haze rolls over Pulau Jerebu, and clean air is running out.',
+      'ms': 'Kebakaran hutan dan tanah gambut merebak di rantau ini. Jerebu tebal menyelubungi Pulau Jerebu, dan udara bersih semakin berkurangan.',
+    },
+    'story_2_title': {'en': 'A friendly showdown', 'ms': 'Pertandingan mesra'},
+    'story_2': {
+      'en': '25 players drop onto the island for a water-blaster battle. Nobody gets hurt: you just get tagged out.',
+      'ms': '25 pemain terjun ke pulau untuk pertarungan penembak air. Tiada sesiapa cedera: anda cuma ditag keluar.',
+    },
+    'story_3_title': {'en': 'Plant the future', 'ms': 'Tanam masa depan'},
+    'story_3': {
+      'en': 'Find seed packs and plant trees. Every tree grows a bubble of clean air that protects you from the haze.',
+      'ms': 'Cari paket benih dan tanam pokok. Setiap pokok membesarkan gelembung udara bersih yang melindungi anda daripada jerebu.',
+    },
+    'story_4_title': {'en': 'Be the last one breathing', 'ms': 'Jadilah yang terakhir bernafas'},
+    'story_4': {
+      'en': 'Survive the shrinking haze, out-play the others, and learn how real haze affects Malaysia.',
+      'ms': 'Harungi jerebu yang semakin mengecil, kalahkan pemain lain, dan pelajari kesan jerebu sebenar kepada Malaysia.',
+    },
+    'guide_controls_title': {'en': 'Controls', 'ms': 'Kawalan'},
+    'guide_controls': {
+      'en': 'Drag on the left side to move. Drag the right stick to aim; push it past the ring to fire. Buttons: tree (hold to plant), water (heal), mask (haze shield), reload. Tap a weapon slot to switch weapons.',
+      'ms': 'Seret di sebelah kiri untuk bergerak. Seret kayu kanan untuk membidik; tolak melepasi gelang untuk menembak. Butang: pokok (tahan untuk tanam), air (pulih), topeng (pelindung jerebu), isi semula. Ketik slot senjata untuk menukar senjata.',
+    },
+    'guide_goal_title': {'en': 'Goal', 'ms': 'Matlamat'},
+    'guide_goal': {
+      'en':
+          'Pick a landing spot, collect gear and be the last player standing out of 25. A match lasts about 3 minutes.',
+      'ms': 'Pilih tempat mendarat, kumpul kelengkapan dan jadilah pemain terakhir daripada 25. Satu perlawanan mengambil masa kira-kira 3 minit.',
+    },
+    'guide_haze_title': {'en': 'The haze', 'ms': 'Jerebu'},
+    'guide_haze': {
+      'en': 'The orange edge is the safe zone; outside it the haze drains your health. The white dashed circle shows where the zone shrinks next, and the timer at the top tells you when. An Air Mask reduces haze damage.',
+      'ms': 'Tepi jingga ialah zon selamat; di luarnya jerebu mengurangkan nyawa anda. Bulatan putih bertitik menunjukkan saiz zon seterusnya, dan pemasa di atas memberitahu bila. Topeng Udara mengurangkan kesan jerebu.',
+    },
+    'guide_trees_title': {'en': 'Trees', 'ms': 'Pokok'},
+    'guide_trees': {
+      'en': 'Seed packs let you plant trees: hold the tree button for 2 seconds without moving. Trees grow in 3 stages and their green bubble is clean air where the haze cannot hurt you. Blasters can destroy trees.',
+      'ms': 'Paket benih membolehkan anda menanam pokok: tahan butang pokok selama 2 saat tanpa bergerak. Pokok membesar dalam 3 peringkat dan gelembung hijaunya ialah udara bersih yang selamat daripada jerebu. Penembak boleh memusnahkan pokok.',
+    },
+    'guide_loot_title': {'en': 'Loot', 'ms': 'Barangan'},
+    'guide_loot': {
+      'en': 'Splash Pistol: fast, short range. Soaker Rifle: longer range. Bubble Launcher: splashes an area. Vests absorb blaster hits. Water Bottle heals. Walk over items to pick them up; tap Take to swap weapons.',
+      'ms': 'Pistol Percik: laju, jarak dekat. Senapang Penyiram: jarak lebih jauh. Pelancar Buih: percikan kawasan. Jaket menyerap tembakan. Botol Air memulihkan. Jalan di atas barang untuk mengambilnya; ketik Ambil untuk menukar senjata.',
+    },
+    'guide_rewards_title': {'en': 'Score and rewards', 'ms': 'Skor dan ganjaran'},
+    'guide_rewards': {
+      'en': 'Your score adds up placement, tag-outs, trees planted and time survived. Earn XP to level up, finish 3 daily missions, keep a daily streak and unlock new skins in the Locker.',
+      'ms': 'Skor anda menggabungkan kedudukan, tag keluar, pokok ditanam dan masa bertahan. Kumpul XP untuk naik tahap, selesaikan 3 misi harian, kekalkan rentetan harian dan buka kulit baharu di Loker.',
+    },
     'air_alert': {'en': 'Air quality alert', 'ms': 'Amaran kualiti udara'},
+
+    // ---- Blok Craft and building ----
+    'blok_craft': {'en': 'Blok Craft', 'ms': 'Blok Craft'},
+    'blok_craft_sub': {
+      'en': 'Mine, build and plant. No haze, no clock.',
+      'ms': 'Gali, bina dan tanam. Tiada jerebu, tiada jam.',
+    },
+    'royale_sub': {'en': '25 players, shrinking haze', 'ms': '25 pemain, jerebu mengecil'},
+    'build': {'en': 'Build', 'ms': 'Bina'},
+    'build_mode': {'en': 'Build mode', 'ms': 'Mod bina'},
+    'built': {'en': 'placed', 'ms': 'diletak'},
+    'mined': {'en': 'mined', 'ms': 'digali'},
+    'mine_block': {'en': 'Hold to mine', 'ms': 'Tahan untuk gali'},
+    'place_block': {'en': 'Place block', 'ms': 'Letak blok'},
+    'mining': {'en': 'Mining...', 'ms': 'Menggali...'},
+    'craft_title': {'en': 'Crafting', 'ms': 'Pertukangan'},
+    'make': {'en': 'Make', 'ms': 'Buat'},
+    'no_blocks': {'en': 'No blocks yet — mine some first', 'ms': 'Belum ada blok — gali dahulu'},
+    'blocks_placed': {'en': 'Blocks placed', 'ms': 'Blok diletak'},
+    'leave_craft': {'en': 'Leave Blok Craft?', 'ms': 'Tinggalkan Blok Craft?'},
+    'look_around': {'en': 'Drag to look around, double tap to reset', 'ms': 'Seret untuk melihat, ketik dua kali untuk set semula'},
+    'tut_build': {
+      'en': 'Tap the grid button for build mode: hold the brown button to mine, tap + to place a block',
+      'ms': 'Ketik butang grid untuk mod bina: tahan butang perang untuk menggali, ketik + untuk meletak blok',
+    },
+    'tut_camera': {
+      'en': 'Drag the 360 pad to swing the camera around. Double tap it to look forward again',
+      'ms': 'Seret pad 360 untuk memusingkan kamera. Ketik dua kali untuk melihat ke hadapan semula',
+    },
+    'tut_craft': {
+      'en': 'Craft planks, glass, lanterns, air filters — even seed packs — from what you mine',
+      'ms': 'Buat papan, kaca, tanglung, penapis udara — juga paket benih — daripada hasil galian',
+    },
+
+    // ---- Graphics settings ----
+    'graphics': {'en': 'Graphics', 'ms': 'Grafik'},
+    'gfx_low': {'en': 'Low', 'ms': 'Rendah'},
+    'gfx_medium': {'en': 'Medium', 'ms': 'Sedang'},
+    'gfx_high': {'en': 'High', 'ms': 'Tinggi'},
+    'gfx_ultra': {'en': 'Ultra', 'ms': 'Ultra'},
+    'graphics_hint': {
+      'en': 'Ultra adds cube textures, cast shadows and water sparkle. The game lowers this by itself if the phone struggles.',
+      'ms': 'Ultra menambah tekstur kubus, bayang dan kilauan air. Permainan akan menurunkannya sendiri jika telefon tersekat.',
+    },
+    'camera_follow': {'en': 'Camera follows you', 'ms': 'Kamera mengikut anda'},
+    'camera_angle': {'en': 'Camera angle', 'ms': 'Sudut kamera'},
+
+    // ---- Guide ----
+    'guide_blocks_title': {'en': 'Blocks and building', 'ms': 'Blok dan pembinaan'},
+    'guide_blocks': {
+      'en': 'The island is dotted with cubes: logs in the forest, stone in town, sand on the beach. Tap the grid button to enter build mode, hold the mine button to break the block you are facing and tap + to stack one in front of you. Blocks stop blasters, so a quick wall is real cover — and it can be shot away. Craft planks, glass, lanterns, air-filter blocks (they make clean air like a tree) and even seed packs.',
+      'ms': 'Pulau ini dipenuhi kubus: balak di hutan, batu di pekan, pasir di pantai. Ketik butang grid untuk mod bina, tahan butang gali untuk memecahkan blok di hadapan anda dan ketik + untuk menyusun satu di hadapan. Blok menghalang tembakan, jadi dinding pantas ialah perlindungan sebenar — dan boleh ditembak hancur. Buat papan, kaca, tanglung, blok penapis udara (ia menghasilkan udara bersih seperti pokok) dan juga paket benih.',
+    },
+    'guide_craft_title': {'en': 'Blok Craft mode', 'ms': 'Mod Blok Craft'},
+    'guide_craft': {
+      'en': 'Blok Craft is the sandbox: the whole island to yourself, no bots and no haze, with a day and night cycle that runs about seven minutes. Mine what you like, build what you like, plant a forest. Lantern blocks light up after dark.',
+      'ms': 'Blok Craft ialah mod bebas: seluruh pulau untuk anda, tiada bot dan tiada jerebu, dengan kitaran siang dan malam kira-kira tujuh minit. Gali apa sahaja, bina apa sahaja, tanam hutan. Blok tanglung menyala selepas gelap.',
+    },
+    'guide_camera_title': {'en': 'The camera', 'ms': 'Kamera'},
+    'guide_camera': {
+      'en': 'The world is fully 3D. Drag the 360 pad near the fire stick to orbit the camera and tilt it towards the horizon; double tap to snap back. Choose a default angle and whether the camera follows your movement in Settings.',
+      'ms': 'Dunia ini 3D sepenuhnya. Seret pad 360 berhampiran kayu tembak untuk memusingkan kamera dan melaraskan sudutnya; ketik dua kali untuk kembali. Pilih sudut lalai dan sama ada kamera mengikut pergerakan anda di Tetapan.',
+    },
   };
 }

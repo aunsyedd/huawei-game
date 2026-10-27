@@ -2,6 +2,7 @@
   "placement_points": 10,
   "tag_out": 50,
   "tree_planted": 40,
+  "block_placed": 4,
   "per_second": 1,
   "win_bonus": 250
 }

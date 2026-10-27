@@ -248,6 +248,30 @@ def sfx():
     chime = mix(d, *[(bell(note(x), 0.4, 0.8), 0.15 + i * 0.09, 0.8) for i, x in enumerate(['G5', 'A5', 'C6', 'D6', 'E6'])])
     write('plant', 0.4 * rustle + chime, 0.8)
 
+    # Mine: a block takes a hit and crumbles.
+    d = 0.26
+    n = int(d * SR)
+    crunch = band(noise(d), 260, 4200) * env(n, 0.001, 0.045)
+    thud = sweep(190, 80, d) * env(n, 0.001, 0.055)
+    grit = mix(d, *[(highpass(noise(0.03), 3000) * env(int(0.03 * SR), 0.001, 0.009), s, 0.5)
+                    for s in (0.05, 0.1, 0.16)])
+    write('mine', crunch + 0.8 * thud + 0.6 * grit, 0.8)
+
+    # Place: a block set down, woody knock with a short tail.
+    d = 0.2
+    n = int(d * SR)
+    knock = tone(300, d, 'tri') * env(n, 0.001, 0.03)
+    tap = band(noise(d), 700, 5200) * env(n, 0.0008, 0.016)
+    write('place', knock + 0.7 * tap + 0.4 * sweep(520, 300, d) * env(n, 0.001, 0.025), 0.75)
+
+    # Craft: workbench clack then a satisfied two-note pluck.
+    d = 0.7
+    parts = [(band(noise(0.08), 500, 4000) * env(int(0.08 * SR), 0.001, 0.02), 0.0, 0.7),
+             (pluck(note('E5'), 0.35), 0.08, 0.9),
+             (pluck(note('B5'), 0.4), 0.2, 0.8),
+             (shaker(), 0.3, 0.5)]
+    write('craft', mix(d, *parts), 0.8)
+
     # Haze warning: low two-tone horn.
     d = 1.7
     horn = np.zeros(int(d * SR))

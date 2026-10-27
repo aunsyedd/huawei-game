@@ -5,6 +5,7 @@ import '../../app/responsive.dart';
 import '../components/actor.dart';
 import '../haze_royale_game.dart';
 import '../systems/match_manager.dart';
+import 'build_bar.dart';
 import 'minimap.dart';
 
 /// Heads-up display: rebuilt ~12x per second from [HazeRoyaleGame.hudTick].
@@ -55,13 +56,18 @@ class Hud extends StatelessWidget {
                       spacing: 6 * k,
                       runSpacing: 4,
                       children: [
-                        _chip(Icons.person, '${sim.aliveCount} ${s('alive')}', k),
-                        _chip(Icons.water_drop, '${p.tagOuts} ${s('tags')}', k),
+                        if (sim.mode == GameMode.royale) ...[
+                          _chip(Icons.person, '${sim.aliveCount} ${s('alive')}', k),
+                          _chip(Icons.water_drop, '${p.tagOuts} ${s('tags')}', k),
+                        ] else ...[
+                          _chip(Icons.grid_view_rounded, '${p.blocksPlaced} ${s('built')}', k),
+                          _chip(Icons.construction, '${p.blocksMined} ${s('mined')}', k),
+                          _chip(Icons.wb_sunny, _clock(game.timeOfDay), k),
+                        ],
                         if (showFps) _chip(Icons.speed, '${game.fps.round()} fps', k),
                       ],
                     ),
-                    SizedBox(height: 5 * k),
-                    _zoneLabel(s, k),
+                    if (sim.mode == GameMode.royale) ...[SizedBox(height: 5 * k), _zoneLabel(s, k)],
                   ],
                 ),
               ),
@@ -137,13 +143,17 @@ class Hud extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  BlockHotbar(game: game, slot: (34 * k).clamp(28.0, 46.0)),
+                  SizedBox(height: 4 * k),
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [for (var i = 0; i < 2; i++) _weaponSlot(i, lang, slotW, k)],
                   ),
                   SizedBox(height: 5 * k),
-                  _bar(p.armour / 100, const Color(0xFF42A5F5), barW, 6 * k),
-                  SizedBox(height: 3 * k),
+                  if (sim.mode == GameMode.royale) ...[
+                    _bar(p.armour / 100, const Color(0xFF42A5F5), barW, 6 * k),
+                    SizedBox(height: 3 * k),
+                  ],
                   _bar(
                     p.health / p.maxHealth,
                     p.health < 30 ? const Color(0xFFEF5350) : const Color(0xFF66BB6A),
@@ -158,6 +168,12 @@ class Hud extends StatelessWidget {
           ),
       ],
     );
+  }
+
+  /// Blok Craft clock, shown as a 24 h time so the day cycle is readable.
+  static String _clock(double timeOfDay) {
+    final mins = (timeOfDay * 1440).round() % 1440;
+    return '${(mins ~/ 60).toString().padLeft(2, '0')}:${(mins % 60).toString().padLeft(2, '0')}';
   }
 
   Widget _zoneLabel(S s, double k) {
@@ -297,9 +313,12 @@ class Hud extends StatelessWidget {
 
 /// Column of action buttons beside the aim stick: plant (hold), water, mask, reload.
 class ActionButtons extends StatelessWidget {
-  const ActionButtons({super.key, required this.game, this.size = 46});
+  const ActionButtons({super.key, required this.game, this.size = 46, this.minimal = false});
   final HazeRoyaleGame game;
   final double size;
+
+  /// While building, only the plant button is kept.
+  final bool minimal;
 
   @override
   Widget build(BuildContext context) {
@@ -314,24 +333,26 @@ class ActionButtons extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             _PlantButton(game: game, size: size * 1.25),
-            gap,
-            _RoundButton(
-              icon: Icons.water_drop,
-              count: p.water,
-              size: size,
-              color: const Color(0xFF29B6F6),
-              onTap: () => sim.startAction(p, ActorAction.healing),
-            ),
-            gap,
-            _RoundButton(
-              icon: Icons.masks,
-              count: p.masks,
-              size: size,
-              color: const Color(0xFFCFD8DC),
-              onTap: () => sim.startAction(p, ActorAction.masking),
-            ),
-            gap,
-            _RoundButton(icon: Icons.refresh, size: size, onTap: sim.reload),
+            if (!minimal) ...[
+              gap,
+              _RoundButton(
+                icon: Icons.water_drop,
+                count: p.water,
+                size: size,
+                color: const Color(0xFF29B6F6),
+                onTap: () => sim.startAction(p, ActorAction.healing),
+              ),
+              gap,
+              _RoundButton(
+                icon: Icons.masks,
+                count: p.masks,
+                size: size,
+                color: const Color(0xFFCFD8DC),
+                onTap: () => sim.startAction(p, ActorAction.masking),
+              ),
+              gap,
+              _RoundButton(icon: Icons.refresh, size: size, onTap: sim.reload),
+            ],
           ],
         );
       },

@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/game/game_screen.dart';
+import '../game/systems/match_manager.dart';
+import '../features/guide/guide_screen.dart';
 import '../features/leaderboard/leaderboard_screen.dart';
 import '../features/lobby/lobby_screen.dart';
 import '../features/menu/menu_screen.dart';
 import '../features/results/results_screen.dart';
 import '../features/settings/settings_screen.dart';
+import '../features/story/story_screen.dart';
 
 CustomTransitionPage<void> _fade(GoRouterState state, Widget child) => CustomTransitionPage(
   key: state.pageKey,
@@ -20,8 +23,11 @@ final appRouter = GoRouter(
     GoRoute(path: '/', pageBuilder: (c, s) => _fade(s, const MenuScreen())),
     GoRoute(path: '/lobby', pageBuilder: (c, s) => _fade(s, const LobbyScreen())),
     GoRoute(path: '/game', pageBuilder: (c, s) => _fade(s, const GameScreen())),
+    GoRoute(path: '/craft', pageBuilder: (c, s) => _fade(s, const GameScreen(mode: GameMode.craft))),
     GoRoute(path: '/results', pageBuilder: (c, s) => _fade(s, const ResultsScreen())),
     GoRoute(path: '/leaderboard', pageBuilder: (c, s) => _fade(s, const LeaderboardScreen())),
     GoRoute(path: '/settings', pageBuilder: (c, s) => _fade(s, const SettingsScreen())),
+    GoRoute(path: '/story', pageBuilder: (c, s) => _fade(s, const StoryScreen())),
+    GoRoute(path: '/guide', pageBuilder: (c, s) => _fade(s, const GuideScreen())),
   ],
 );

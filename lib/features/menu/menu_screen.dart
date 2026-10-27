@@ -9,6 +9,7 @@ import '../../app/responsive.dart';
 import '../../app/theme.dart';
 import '../../services/hms/air_quality_service.dart';
 import '../../state/providers.dart';
+import 'progress_card.dart';
 
 class MenuScreen extends ConsumerStatefulWidget {
   const MenuScreen({super.key});
@@ -30,8 +31,28 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with SingleTickerProvid
       if (mounted) setState(() => _alert = a);
     });
     // Warm up config loading so the lobby opens instantly.
-    ref.read(gameConfigProvider);
     ref.read(audioServiceProvider).music('music_menu');
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onOpen());
+  }
+
+  /// First launch shows the story; every new day grants the login bonus.
+  Future<void> _onOpen() async {
+    if (!ref.read(settingsProvider).storySeen) {
+      if (mounted) context.go('/story');
+      return;
+    }
+    final cfg = await ref.read(gameConfigProvider.future);
+    if (!mounted) return;
+    final bonus = ref.read(progressProvider.notifier).login(cfg);
+    if (bonus > 0 && mounted) {
+      final s = S.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(s('daily_bonus', {'xp': bonus, 'n': ref.read(progressProvider).streak})),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   @override
@@ -105,7 +126,28 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with SingleTickerProvid
                           ),
                         ),
                       ),
-                      SizedBox(height: r.compact ? 10 : 14),
+                      SizedBox(height: r.compact ? 8 : 12),
+                      FilledButton.icon(
+                        onPressed: () {
+                          ref.read(audioServiceProvider).sfx('ui_click');
+                          context.go('/craft');
+                        },
+                        icon: const Icon(Icons.grid_view_rounded, size: 22),
+                        label: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(s('blok_craft'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                            if (!r.compact)
+                              Text(s('blok_craft_sub'), style: const TextStyle(fontSize: 11, height: 1.1)),
+                          ],
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF6D4C41),
+                          padding: EdgeInsets.symmetric(horizontal: 22, vertical: r.compact ? 8 : 12),
+                        ),
+                      ),
+                      SizedBox(height: r.compact ? 8 : 14),
                       Wrap(
                         spacing: 10,
                         runSpacing: 8,
@@ -119,6 +161,16 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with SingleTickerProvid
                             onPressed: () => context.go('/settings'),
                             icon: const Icon(Icons.settings),
                             label: Text(s('settings')),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: () => context.go('/guide'),
+                            icon: const Icon(Icons.help_outline),
+                            label: Text(s('how_to_play')),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: () => context.go('/story'),
+                            icon: const Icon(Icons.auto_stories),
+                            label: Text(s('story')),
                           ),
                           SegmentedButton<String>(
                             segments: const [
@@ -176,9 +228,9 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with SingleTickerProvid
                                 ),
                               ),
                               const Divider(),
-                              _stat(s('matches'), stats.matches),
+                              ProgressCard(compact: r.compact),
+                              const Divider(),
                               _stat(s('wins'), stats.wins),
-                              _stat(s('total_trees'), stats.trees),
                               _stat(s('best_score'), stats.bestScore),
                               const SizedBox(height: 6),
                               Row(

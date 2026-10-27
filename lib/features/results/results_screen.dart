@@ -67,6 +67,7 @@ class ResultsScreen extends ConsumerWidget {
                           ),
                           _tile(Icons.water_drop, s('tags'), '${r.tagOuts}', tileW),
                           _tile(Icons.park, s('trees_planted'), '${r.treesPlanted}', tileW),
+                          _tile(Icons.grid_view_rounded, s('blocks_placed'), '${r.blocksPlaced}', tileW),
                           _tile(
                             Icons.timer,
                             s('time_survived'),
@@ -102,6 +103,21 @@ class ResultsScreen extends ConsumerWidget {
                           ],
                         ),
                       ),
+                      _RewardLine(Icons.bolt, const Color(0xFFFFCA28), s('xp_gained', {'xp': summary.reward.xpGained})),
+                      if (summary.reward.levelledUp)
+                        _RewardLine(
+                          Icons.trending_up,
+                          const Color(0xFF66BB6A),
+                          s('level_up', {'n': summary.reward.levelAfter}),
+                        ),
+                      for (final m in summary.reward.missionsCompleted)
+                        _RewardLine(
+                          Icons.check_circle,
+                          const Color(0xFF66BB6A),
+                          s('mission_done', {'m': m.text(s.lang)}),
+                        ),
+                      for (final k in summary.reward.newSkins)
+                        _RewardLine(Icons.checkroom, k.color, s('new_skin', {'s': k.name(s.lang)})),
                       for (final a in summary.unlocked)
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
@@ -200,6 +216,27 @@ class ResultsScreen extends ConsumerWidget {
           fit: BoxFit.scaleDown,
           alignment: Alignment.centerLeft,
           child: Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+        ),
+      ],
+    ),
+  );
+}
+
+class _RewardLine extends StatelessWidget {
+  const _RewardLine(this.icon, this.color, this.text);
+  final IconData icon;
+  final Color color;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 4),
+    child: Row(
+      children: [
+        Icon(icon, color: color, size: 18),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(text, style: const TextStyle(fontWeight: FontWeight.w600)),
         ),
       ],
     ),

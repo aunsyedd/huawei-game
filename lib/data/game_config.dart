@@ -198,10 +198,11 @@ class ScoreConfig {
     : placementPoints = _d(j['placement_points']),
       tagOut = _d(j['tag_out']),
       treePlanted = _d(j['tree_planted']),
+      blockPlaced = _d(j['block_placed']),
       perSecond = _d(j['per_second']),
       winBonus = _d(j['win_bonus']);
 
-  final double placementPoints, tagOut, treePlanted, perSecond, winBonus;
+  final double placementPoints, tagOut, treePlanted, blockPlaced, perSecond, winBonus;
 }
 
 class AreaConfig {
@@ -238,6 +239,53 @@ class MapConfig {
   final List<AreaConfig> areas;
 }
 
+class MissionDef {
+  MissionDef.fromJson(Map<String, dynamic> j)
+    : id = j['id'] as String,
+      type = j['type'] as String,
+      target = j['target'] as int,
+      xp = j['xp'] as int,
+      en = j['en'] as String,
+      ms = j['ms'] as String;
+
+  final String id, type, en, ms;
+  final int target, xp;
+  String text(String lang) => lang == 'ms' ? ms : en;
+}
+
+class SkinDef {
+  SkinDef.fromJson(Map<String, dynamic> j)
+    : id = j['id'] as String,
+      level = j['level'] as int,
+      color = _hex(j['color'] as String),
+      en = j['en'] as String,
+      ms = j['ms'] as String;
+
+  final String id, en, ms;
+  final int level;
+  final Color color;
+  String name(String lang) => lang == 'ms' ? ms : en;
+}
+
+class ProgressionConfig {
+  ProgressionConfig.fromJson(Map<String, dynamic> j)
+    : xpPerLevelStep = j['xp_per_level_step'] as int,
+      maxLevel = j['max_level'] as int,
+      matchXpBase = j['match_xp_base'] as int,
+      matchXpPerScore = _d(j['match_xp_per_score']),
+      dailyLoginXp = j['daily_login_xp'] as int,
+      streakBonusXp = j['streak_bonus_xp'] as int,
+      streakCapDays = j['streak_cap_days'] as int,
+      missionsPerDay = j['missions_per_day'] as int,
+      missions = [for (final m in j['missions'] as List) MissionDef.fromJson(m as Map<String, dynamic>)],
+      skins = [for (final s in j['skins'] as List) SkinDef.fromJson(s as Map<String, dynamic>)];
+
+  final int xpPerLevelStep, maxLevel, matchXpBase, dailyLoginXp, streakBonusXp, streakCapDays, missionsPerDay;
+  final double matchXpPerScore;
+  final List<MissionDef> missions;
+  final List<SkinDef> skins;
+}
+
 class HazeFact {
   HazeFact(this.en, this.ms);
   final String en, ms;
@@ -257,12 +305,25 @@ class GameConfig {
       bots = BotConfig.fromJson(f['bots']!),
       score = ScoreConfig.fromJson(f['score']!),
       map = MapConfig.fromJson(f['map']!),
+      blocks = BlockConfig.fromJson(f['blocks']!),
+      progression = ProgressionConfig.fromJson(f['progression']!),
       facts = [
         for (final x in f['facts']!['facts'] as List)
           HazeFact((x as Map<String, dynamic>)['en'] as String, x['ms'] as String),
       ];
 
-  static const files = ['weapons', 'loot', 'zone', 'trees', 'bots', 'score', 'map', 'facts'];
+  static const files = [
+    'weapons',
+    'loot',
+    'zone',
+    'trees',
+    'bots',
+    'score',
+    'map',
+    'facts',
+    'progression',
+    'blocks',
+  ];
 
   /// Builds a config from raw JSON strings keyed by file name (without `.json`).
   factory GameConfig.fromSources(Map<String, String> sources) =>
@@ -283,5 +344,130 @@ class GameConfig {
   final BotConfig bots;
   final ScoreConfig score;
   final MapConfig map;
+  final BlockConfig blocks;
+  final ProgressionConfig progression;
   final List<HazeFact> facts;
+}
+
+// ---------------------------------------------------------------- blocks
+
+/// One kind of voxel block: how it looks, how long it takes to mine and what
+/// it does when placed. Loaded from `blocks.json`.
+class BlockType with Named {
+  BlockType.fromJson(Map<String, dynamic> j, this.index)
+    : id = j['id'] as String,
+      nameEn = j['name_en'] as String,
+      nameMs = j['name_ms'] as String,
+      top = _hex(j['top'] as String),
+      side = _hex(j['side'] as String),
+      hardness = _d(j['hardness']),
+      alpha = j['alpha'] == null ? 1.0 : _d(j['alpha']),
+      shine = j['shine'] == null ? 0.0 : _d(j['shine']),
+      glow = j['glow'] == null ? 0.0 : _d(j['glow']),
+      grain = j['grain'] == null ? 0.05 : _d(j['grain']),
+      bubble = j['bubble'] == null ? 0.0 : _d(j['bubble']),
+      rim = j['rim'] == true,
+      drop = (j['drop'] ?? j['id']) as String;
+
+  /// Position in [BlockConfig.types]; the block id stored in the world is
+  /// this + 1 (0 means air).
+  final int index;
+  final String id, drop;
+  @override
+  final String nameEn;
+  @override
+  final String nameMs;
+  final Color top, side;
+
+  /// Seconds to mine with bare hands, before [BlockConfig.mineSpeed].
+  final double hardness;
+
+  /// < 1 for see-through blocks (glass).
+  final double alpha;
+
+  /// Specular highlight strength, self-lit amount and colour noise.
+  final double shine, glow, grain;
+
+  /// Clean-air bubble radius this block creates in the haze (filter block).
+  final double bubble;
+
+  /// Grass-style green rim on the top of the side faces.
+  final bool rim;
+
+  bool get solid => alpha >= 0.999;
+}
+
+/// Turns a few blocks into something else. [item] recipes give an inventory
+/// item (a seed pack, a water bottle) instead of a block.
+class BlockRecipe {
+  BlockRecipe.fromJson(Map<String, dynamic> j)
+    : out = j['out'] as String,
+      count = j['count'] as int,
+      item = j['item'] == true,
+      nameEn = j['name_en'] as String?,
+      nameMs = j['name_ms'] as String?,
+      inputs = (j['in'] as Map<String, dynamic>).map((k, v) => MapEntry(k, v as int));
+
+  final String out;
+  final int count;
+  final bool item;
+  final String? nameEn, nameMs;
+  final Map<String, int> inputs;
+}
+
+/// A patch of minable blocks seeded onto one map area.
+class BlockNodeDef {
+  BlockNodeDef.fromJson(Map<String, dynamic> j)
+    : area = j['area'] as String,
+      block = j['block'] as String,
+      clusters = j['clusters'] as int,
+      size = (j['size'] as List).cast<int>(),
+      stack = (j['stack'] as List).cast<int>();
+
+  final String area, block;
+  final int clusters;
+  final List<int> size, stack;
+}
+
+class BlockConfig {
+  BlockConfig.fromJson(Map<String, dynamic> j)
+    : size = _d(j['size']),
+      maxHeight = j['max_height'] as int,
+      reach = _d(j['reach']),
+      placeCooldown = _d(j['place_cooldown']),
+      mineSpeed = _d(j['mine_speed']),
+      types = [
+        for (var i = 0; i < (j['types'] as List).length; i++)
+          BlockType.fromJson((j['types'] as List)[i] as Map<String, dynamic>, i),
+      ],
+      recipes = [for (final r in j['recipes'] as List) BlockRecipe.fromJson(r as Map<String, dynamic>)],
+      nodes = (j['nodes'] as Map<String, dynamic>).map(
+        (k, v) => MapEntry(k, [for (final n in v as List) BlockNodeDef.fromJson(n as Map<String, dynamic>)]),
+      ),
+      startBlocks = (j['start_blocks'] as Map<String, dynamic>).map(
+        (k, v) => MapEntry(k, (v as Map<String, dynamic>).map((a, b) => MapEntry(a, b as int))),
+      ),
+      startSeeds = (j['start_seeds'] as Map<String, dynamic>).map((k, v) => MapEntry(k, v as int));
+
+  /// World units per block edge.
+  final double size;
+
+  /// How many blocks can be stacked in one column.
+  final int maxHeight;
+
+  /// Targeting distance in blocks, and how much faster than [BlockType.hardness] mining is.
+  final double reach, placeCooldown, mineSpeed;
+
+  final List<BlockType> types;
+  final List<BlockRecipe> recipes;
+  final Map<String, List<BlockNodeDef>> nodes;
+  final Map<String, Map<String, int>> startBlocks;
+  final Map<String, int> startSeeds;
+
+  late final Map<String, int> indexOf = {for (final t in types) t.id: t.index};
+
+  BlockType? byId(String id) {
+    final i = indexOf[id];
+    return i == null ? null : types[i];
+  }
 }

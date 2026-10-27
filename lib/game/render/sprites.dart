@@ -7,10 +7,15 @@ import 'dart:ui';
 /// and whole groups (splats, smoke, droplets, glows) go out in one
 /// `drawRawAtlas` call. This is what keeps the frame rate high on phones.
 class Sprites {
-  Sprites._();
+  Sprites._(this.skinColors);
 
   static Sprites? _instance;
-  static Sprites get instance => _instance ??= Sprites._().._build();
+
+  /// Builds the atlas once; [skins] are the unlockable player colours.
+  static Sprites build({List<Color> skins = const []}) => _instance ??= Sprites._(skins).._build();
+  static Sprites get instance => build();
+
+  final List<Color> skinColors;
 
   late final Image atlas;
 
@@ -23,6 +28,7 @@ class Sprites {
   static const dot = Rect.fromLTWH(512, 0, 16, 16);
   static const leaf = Rect.fromLTWH(528, 0, 32, 16);
   static const puff = Rect.fromLTWH(576, 0, 128, 80);
+  static const cube = Rect.fromLTWH(832, 0, 48, 48);
 
   // Coloured sprites.
   static const rock = Rect.fromLTWH(704, 0, 64, 48);
@@ -35,6 +41,9 @@ class Sprites {
 
   /// Loot badge icons, see [lootIcon].
   static Rect loot(int i) => Rect.fromLTWH(48.0 * i, 240, 48, 48);
+
+  /// Player skin bodies (index into the skins in progression.json).
+  static Rect skin(int i) => Rect.fromLTWH(64.0 * i, 300, 64, 64);
 
   static const bodyColors = [
     Color(0xFF29B6F6), // player
@@ -66,6 +75,7 @@ class Sprites {
     c.drawCircle(dot.center, 7, Paint()..color = const Color(0xFFFFFFFF));
     c.drawOval(leaf.deflate(1), Paint()..color = const Color(0xFFFFFFFF));
     _puff(c, puff);
+    _cube(c, cube);
     _rock(c, rock);
     _palm(c, palmCrown);
     _canopy(c, canopy, const Color(0xFF1B5E20), const Color(0xFF2E7D32), const Color(0xFF66BB6A));
@@ -73,10 +83,13 @@ class Sprites {
     for (var i = 0; i < bodyColors.length; i++) {
       _body(c, body(i), bodyColors[i], player: i == 0);
     }
+    for (var i = 0; i < skinColors.length && i < 16; i++) {
+      _body(c, skin(i), skinColors[i], player: true);
+    }
     for (var i = 0; i < lootColors.length; i++) {
       _loot(c, loot(i), i);
     }
-    atlas = rec.endRecording().toImageSync(1024, 320);
+    atlas = rec.endRecording().toImageSync(1024, 384);
   }
 
   // ------------------------------------------------------------------ painters
@@ -156,6 +169,31 @@ class Sprites {
       );
     }
     c.restore();
+  }
+
+  /// A small isometric cube, tinted per draw (mined-block debris).
+  void _cube(Canvas c, Rect r) {
+    final o = r.center, s = r.width * 0.3;
+    final p = Paint()..color = const Color(0xFFFFFFFF);
+    Path face(List<Offset> pts) {
+      final path = Path()..moveTo(pts[0].dx, pts[0].dy);
+      for (final q in pts.skip(1)) {
+        path.lineTo(q.dx, q.dy);
+      }
+      return path..close();
+    }
+
+    final top = [
+      o.translate(0, -s),
+      o.translate(s, -s * 0.5),
+      o.translate(0, 0),
+      o.translate(-s, -s * 0.5),
+    ];
+    final left = [o.translate(-s, -s * 0.5), o.translate(0, 0), o.translate(0, s), o.translate(-s, s * 0.5)];
+    final right = [o.translate(s, -s * 0.5), o.translate(0, 0), o.translate(0, s), o.translate(s, s * 0.5)];
+    c.drawPath(face(top), p);
+    c.drawPath(face(left), Paint()..color = const Color(0xFFB4B4B4));
+    c.drawPath(face(right), Paint()..color = const Color(0xFF8C8C8C));
   }
 
   void _rock(Canvas c, Rect r) {

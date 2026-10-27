@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
@@ -10,6 +11,7 @@ import '../services/audio_service.dart';
 import '../services/hms/account_service.dart';
 import '../services/hms/game_service.dart';
 import '../services/hms/hms_services.dart';
+import 'progression.dart';
 
 /// Overridden in main().
 final sharedPrefsProvider = Provider<SharedPreferences>((ref) => throw UnimplementedError());
@@ -31,11 +33,23 @@ class AppSettings {
     this.haptics = true,
     this.showFps = false,
     this.tutorialDone = false,
+    this.storySeen = false,
+    this.graphics = 3,
+    this.cameraFollow = true,
+    this.cameraTilt = 0.82,
   });
 
   final String language;
   final double soundVolume, musicVolume, sensitivity;
-  final bool haptics, showFps, tutorialDone;
+  final bool haptics, showFps, tutorialDone, storySeen;
+
+  /// Graphics preset: 3 = ultra, 2 = high, 1 = medium, 0 = low.
+  final int graphics;
+
+  /// Camera swings behind the player as they move, and its tilt from
+  /// straight down (bigger = closer to eye level).
+  final bool cameraFollow;
+  final double cameraTilt;
 
   Locale get locale => Locale(language);
 
@@ -47,6 +61,10 @@ class AppSettings {
     bool? haptics,
     bool? showFps,
     bool? tutorialDone,
+    bool? storySeen,
+    int? graphics,
+    bool? cameraFollow,
+    double? cameraTilt,
   }) => AppSettings(
     language: language ?? this.language,
     soundVolume: soundVolume ?? this.soundVolume,
@@ -55,6 +73,10 @@ class AppSettings {
     haptics: haptics ?? this.haptics,
     showFps: showFps ?? this.showFps,
     tutorialDone: tutorialDone ?? this.tutorialDone,
+    storySeen: storySeen ?? this.storySeen,
+    graphics: graphics ?? this.graphics,
+    cameraFollow: cameraFollow ?? this.cameraFollow,
+    cameraTilt: cameraTilt ?? this.cameraTilt,
   );
 }
 
@@ -72,6 +94,10 @@ class SettingsNotifier extends Notifier<AppSettings> {
       haptics: p.getBool('haptics') ?? true,
       showFps: p.getBool('show_fps') ?? false,
       tutorialDone: p.getBool('tutorial_done') ?? false,
+      storySeen: p.getBool('story_seen') ?? false,
+      graphics: p.getInt('graphics') ?? 3,
+      cameraFollow: p.getBool('camera_follow') ?? true,
+      cameraTilt: p.getDouble('camera_tilt') ?? 0.82,
     );
   }
 
@@ -105,6 +131,26 @@ class SettingsNotifier extends Notifier<AppSettings> {
   void setShowFps(bool v) {
     state = state.copyWith(showFps: v);
     _p.setBool('show_fps', v);
+  }
+
+  void setStorySeen(bool v) {
+    state = state.copyWith(storySeen: v);
+    _p.setBool('story_seen', v);
+  }
+
+  void setGraphics(int v) {
+    state = state.copyWith(graphics: v);
+    _p.setInt('graphics', v);
+  }
+
+  void setCameraFollow(bool v) {
+    state = state.copyWith(cameraFollow: v);
+    _p.setBool('camera_follow', v);
+  }
+
+  void setCameraTilt(double v) {
+    state = state.copyWith(cameraTilt: v);
+    _p.setDouble('camera_tilt', v);
   }
 
   void setTutorialDone(bool v) {
@@ -149,6 +195,7 @@ class MatchSummary {
     required this.fact,
     required this.newBest,
     required this.unlocked,
+    required this.reward,
   });
 
   final PlayerResult result;
@@ -156,6 +203,7 @@ class MatchSummary {
   final HazeFact fact;
   final bool newBest;
   final List<String> unlocked;
+  final MatchReward reward;
 }
 
 class ProfileNotifier extends Notifier<ProfileStats> {
@@ -212,7 +260,15 @@ class ProfileNotifier extends Notifier<ProfileStats> {
     }
 
     final fact = cfg.facts[math.Random().nextInt(cfg.facts.length)];
-    return MatchSummary(result: r, score: score, fact: fact, newBest: score > s.bestScore, unlocked: unlocked);
+    final reward = ref.read(progressProvider.notifier).applyMatch(cfg, r, score);
+    return MatchSummary(
+      result: r,
+      score: score,
+      fact: fact,
+      newBest: score > s.bestScore,
+      unlocked: unlocked,
+      reward: reward,
+    );
   }
 }
 
@@ -226,3 +282,64 @@ class LastMatchNotifier extends Notifier<MatchSummary?> {
 }
 
 final lastMatchProvider = NotifierProvider<LastMatchNotifier, MatchSummary?>(LastMatchNotifier.new);
+
+// ---------------- Progression (levels, missions, streak, skins) ----------------
+
+class ProgressNotifier extends Notifier<ProgressState> {
+  static const _key = 'progress_v1';
+  SharedPreferences get _p => ref.read(sharedPrefsProvider);
+
+  @override
+  ProgressState build() {
+    final raw = ref.read(sharedPrefsProvider).getString(_key);
+    if (raw == null) return const ProgressState();
+    try {
+      final j = jsonDecode(raw) as Map<String, dynamic>;
+      return ProgressState(
+        xp: j['xp'] as int,
+        streak: j['streak'] as int,
+        lastLoginDay: j['lastLoginDay'] as int,
+        missionDay: j['missionDay'] as int,
+        progress: (j['progress'] as List).cast<int>(),
+        done: (j['done'] as List).cast<bool>(),
+        skin: j['skin'] as int,
+      );
+    } catch (_) {
+      return const ProgressState();
+    }
+  }
+
+  void _save(ProgressState s) {
+    state = s;
+    _p.setString(
+      _key,
+      jsonEncode({
+        'xp': s.xp,
+        'streak': s.streak,
+        'lastLoginDay': s.lastLoginDay,
+        'missionDay': s.missionDay,
+        'progress': s.progress,
+        'done': s.done,
+        'skin': s.skin,
+      }),
+    );
+  }
+
+  /// Daily login bonus; returns the XP granted (0 if already claimed today).
+  int login(GameConfig cfg, {DateTime? now}) {
+    final (next, bonus) = Progression(cfg.progression).login(state, Progression.dayNumber(now ?? DateTime.now()));
+    _save(next);
+    return bonus;
+  }
+
+  MatchReward applyMatch(GameConfig cfg, PlayerResult r, int score, {DateTime? now}) {
+    final (next, reward) = Progression(cfg.progression)
+        .applyMatch(state, r, score, Progression.dayNumber(now ?? DateTime.now()));
+    _save(next);
+    return reward;
+  }
+
+  void setSkin(int index) => _save(state.copyWith(skin: index));
+}
+
+final progressProvider = NotifierProvider<ProgressNotifier, ProgressState>(ProgressNotifier.new);

@@ -1,0 +1,36 @@
+{
+  "xp_per_level_step": 150,
+  "max_level": 20,
+  "match_xp_base": 20,
+  "match_xp_per_score": 0.1,
+  "daily_login_xp": 50,
+  "streak_bonus_xp": 10,
+  "streak_cap_days": 7,
+  "missions_per_day": 3,
+  "missions": [
+    {"id": "plant_3", "type": "trees", "target": 3, "xp": 120,
+     "en": "Plant 3 trees", "ms": "Tanam 3 pokok"},
+    {"id": "plant_8", "type": "trees", "target": 8, "xp": 200,
+     "en": "Plant 8 trees", "ms": "Tanam 8 pokok"},
+    {"id": "tag_2", "type": "tag_outs", "target": 2, "xp": 120,
+     "en": "Tag out 2 players", "ms": "Tag keluar 2 pemain"},
+    {"id": "tag_6", "type": "tag_outs", "target": 6, "xp": 200,
+     "en": "Tag out 6 players", "ms": "Tag keluar 6 pemain"},
+    {"id": "survive_120", "type": "survive_seconds", "target": 120, "xp": 120,
+     "en": "Survive 2 minutes in one match", "ms": "Bertahan 2 minit dalam satu perlawanan"},
+    {"id": "top5", "type": "top5", "target": 1, "xp": 150,
+     "en": "Finish in the top 5", "ms": "Tamat dalam 5 teratas"},
+    {"id": "play_3", "type": "matches", "target": 3, "xp": 100,
+     "en": "Play 3 matches", "ms": "Main 3 perlawanan"},
+    {"id": "win_1", "type": "wins", "target": 1, "xp": 250,
+     "en": "Win a match", "ms": "Menang satu perlawanan"}
+  ],
+  "skins": [
+    {"id": "sky", "level": 1, "color": "#29B6F6", "en": "Sky", "ms": "Langit"},
+    {"id": "leaf", "level": 2, "color": "#66BB6A", "en": "Leaf", "ms": "Daun"},
+    {"id": "sunset", "level": 4, "color": "#FFA726", "en": "Sunset", "ms": "Senja"},
+    {"id": "orchid", "level": 6, "color": "#BA68C8", "en": "Orchid", "ms": "Orkid"},
+    {"id": "hibiscus", "level": 8, "color": "#E53935", "en": "Hibiscus", "ms": "Bunga Raya"},
+    {"id": "gold", "level": 10, "color": "#FFD54F", "en": "Gold", "ms": "Emas"}
+  ]
+}

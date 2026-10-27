@@ -7,7 +7,7 @@ class Decal {
   bool active = false;
 }
 
-enum FxKind { droplet, dust, leaf, sparkle, muzzle }
+enum FxKind { droplet, dust, leaf, sparkle, muzzle, cube }
 
 class FxParticle {
   bool active = false;
@@ -120,6 +120,18 @@ class FxSystem {
     }
   }
 
+  /// Little cubes popping out of a block that was mined or shot away.
+  void blockBurst(double x, double y, int color, {int count = 10, double size = 5}) {
+    for (var i = 0; i < count; i++) {
+      final a = _rng.nextDouble() * math.pi * 2;
+      final s = 40 + _rng.nextDouble() * 110;
+      _next(FxKind.cube, x, y, 14, 0.5 + _rng.nextDouble() * 0.45, size + _rng.nextDouble() * size * 0.7, color)
+        ..vx = math.cos(a) * s
+        ..vy = math.sin(a) * s
+        ..vz = 80 + _rng.nextDouble() * 150;
+    }
+  }
+
   void sparkle(double x, double y, int color) {
     for (var i = 0; i < 8; i++) {
       final a = i / 8 * math.pi * 2;
@@ -156,6 +168,14 @@ class FxSystem {
             p.vz = 0;
             p.vx *= 0.2;
             p.vy *= 0.2;
+          }
+        case FxKind.cube:
+          p.vz -= 620 * dt;
+          if (p.z <= 0) {
+            p.z = 0;
+            p.vz = -p.vz * 0.25;
+            p.vx *= 0.45;
+            p.vy *= 0.45;
           }
         case FxKind.leaf:
           p.vz -= 260 * dt;
