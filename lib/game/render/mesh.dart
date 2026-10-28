@@ -5,12 +5,20 @@ import 'dart:ui';
 /// A low-poly 3D model: vertices in local space (x forward, y right/south,
 /// z up), flat-coloured triangles with outward normals.
 class Mesh {
-  Mesh(this.verts, this.tris, this.colors, this.normals);
+  Mesh(this.verts, this.tris, this.colors, this.normals, [this.anchors, this.glow]);
 
   final Float32List verts; // x,y,z per vertex
   final Int32List tris; // 3 vertex indices per triangle
   final Int32List colors; // ARGB per triangle
   final Float32List normals; // x,y,z per triangle
+
+  /// Optional per-triangle depth anchor (x, y, z, bias). Decals such as
+  /// windows sort by one shared point instead of their own centroid, so a
+  /// window is never half hidden by the wall it is painted on. NaN x = none.
+  final Float32List? anchors;
+
+  /// Optional per-triangle night glow 0..1 (lit windows, lanterns).
+  final Float32List? glow;
 
   int get vertexCount => verts.length ~/ 3;
   int get triCount => tris.length ~/ 3;
@@ -23,6 +31,15 @@ class MeshBuilder {
   final List<int> _t = [];
   final List<int> _c = [];
   final List<double> _n = [];
+  final List<double> _a = [];
+  final List<double> _g = [];
+  bool _hasAnchors = false, _hasGlow = false;
+
+  /// Depth anchor applied to the triangles added while it is set.
+  ({double x, double y, double z, double bias})? anchor;
+
+  /// Night glow applied to the triangles added while it is non-zero.
+  double glow = 0;
 
   int vert(double x, double y, double z) {
     _v
@@ -60,6 +77,15 @@ class MeshBuilder {
       ..add(nx)
       ..add(ny)
       ..add(nz);
+    final an = anchor;
+    if (an != null) _hasAnchors = true;
+    _a
+      ..add(an?.x ?? double.nan)
+      ..add(an?.y ?? 0)
+      ..add(an?.z ?? 0)
+      ..add(an?.bias ?? 0);
+    if (glow > 0) _hasGlow = true;
+    _g.add(glow);
   }
 
   void quad(int a, int b, int c, int d, Color color, double cx, double cy, double cz) {
@@ -78,6 +104,7 @@ class MeshBuilder {
     Color color, {
     Color? top,
     bool bottom = false,
+    bool lid = true,
   }) {
     final cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2;
     final p = [
@@ -94,7 +121,7 @@ class MeshBuilder {
     quad(p[1], p[2], p[6], p[5], color, cx, cy, cz);
     quad(p[2], p[3], p[7], p[6], color, cx, cy, cz);
     quad(p[3], p[0], p[4], p[7], color, cx, cy, cz);
-    quad(p[4], p[5], p[6], p[7], top ?? color, cx, cy, cz);
+    if (lid) quad(p[4], p[5], p[6], p[7], top ?? color, cx, cy, cz);
     if (bottom) quad(p[0], p[1], p[2], p[3], color, cx, cy, cz);
   }
 
@@ -218,8 +245,14 @@ class MeshBuilder {
     tri(l1, end, r1, tip, c.$1, c.$2, c.$3);
   }
 
-  Mesh build() =>
-      Mesh(Float32List.fromList(_v), Int32List.fromList(_t), Int32List.fromList(_c), Float32List.fromList(_n));
+  Mesh build() => Mesh(
+    Float32List.fromList(_v),
+    Int32List.fromList(_t),
+    Int32List.fromList(_c),
+    Float32List.fromList(_n),
+    _hasAnchors ? Float32List.fromList(_a) : null,
+    _hasGlow ? Float32List.fromList(_g) : null,
+  );
 
   bool get isEmpty => _t.isEmpty;
 }

@@ -812,6 +812,27 @@ class HazeRoyaleGame extends Game with MatchListener {
       }
     }
 
+    if (type != 'town' && type != 'beach') {
+      // Fine grass grain in three tones so the green never reads as flat paint.
+      final grain = type == 'forest'
+          ? const [Color(0x2A0E2E10), Color(0x22A5D66A), Color(0x1E2E7D32)]
+          : const [Color(0x241B4A12), Color(0x2AE6F5A0), Color(0x20558B2F)];
+      for (var i = 0; i < n * 2.2; i++) {
+        final o = rnd();
+        p.color = grain[i % 3];
+        c.drawRect(Rect.fromCenter(center: o, width: 2.2 + rng.nextDouble() * 2.5, height: 1.6), p);
+      }
+      // Pebbles with a sunny highlight.
+      for (var i = 0; i < n * 0.05; i++) {
+        final o = rnd();
+        final r = 1.6 + rng.nextDouble() * 2.2;
+        p.color = const Color(0x55776655);
+        c.drawCircle(o, r, p);
+        p.color = const Color(0x55E8E0D0);
+        c.drawCircle(o.translate(-r * 0.3, -r * 0.3), r * 0.45, p);
+      }
+    }
+
     switch (type) {
       case 'forest':
         p.color = const Color(0x332A1B0E);
@@ -844,20 +865,55 @@ class HazeRoyaleGame extends Game with MatchListener {
           }
         }
       case 'town':
-        s
-          ..strokeWidth = 1
-          ..color = const Color(0x14000000);
-        final x0 = (area.left / 40).floor() * 40.0, y0 = (area.top / 40).floor() * 40.0;
-        for (var x = x0; x < area.right; x += 40) {
-          c.drawLine(Offset(x, area.top), Offset(x, area.bottom), s);
-        }
-        for (var y = y0; y < area.bottom; y += 40) {
-          c.drawLine(Offset(area.left, y), Offset(area.right, y), s);
-        }
-        s.color = const Color(0x22000000);
-        for (var i = 0; i < n * 0.04; i++) {
-          final o = rnd();
-          c.drawLine(o, o.translate(rng.nextDouble() * 20 - 10, rng.nextDouble() * 20 - 10), s);
+        // Paving slabs: each one a slightly different tone, with a light
+        // bevel on the sunny edge and a dark joint on the other, plus the odd
+        // stained or cracked slab and a few manhole covers.
+        const slab = 40.0;
+        final x0 = (area.left / slab).floor() * slab, y0 = (area.top / slab).floor() * slab;
+        for (var y = y0; y < area.bottom; y += slab) {
+          for (var x = x0; x < area.right; x += slab) {
+            var hsh = ((x / slab).round() * 73856093) ^ ((y / slab).round() * 19349663);
+            hsh = (hsh ^ (hsh >> 13)) * 1274126177;
+            final v = ((hsh >> 8) & 0xFF) / 255.0;
+            final cell = Rect.fromLTWH(x, y, slab, slab);
+            p.color = v < 0.5
+                ? Color.fromRGBO(0, 0, 0, 0.02 + v * 0.07)
+                : Color.fromRGBO(255, 255, 255, 0.02 + (v - 0.5) * 0.14);
+            c.drawRect(cell.deflate(1), p);
+            p.color = const Color(0x2EFFFFFF);
+            c.drawRect(Rect.fromLTWH(x + 1, y + 1, slab - 2, 1.6), p);
+            c.drawRect(Rect.fromLTWH(x + 1, y + 1, 1.6, slab - 2), p);
+            p.color = const Color(0x26000000);
+            c.drawRect(Rect.fromLTWH(x, y + slab - 1.4, slab, 1.4), p);
+            c.drawRect(Rect.fromLTWH(x + slab - 1.4, y, 1.4, slab), p);
+            final kind = (hsh >> 16) & 0x3F;
+            if (kind == 1) {
+              // Stain.
+              p.color = const Color(0x18302010);
+              c.drawOval(Rect.fromCenter(center: cell.center, width: 22, height: 14), p);
+            } else if (kind == 2) {
+              // Crack.
+              s
+                ..strokeWidth = 1.1
+                ..color = const Color(0x30000000);
+              final o = cell.topLeft.translate(8, 10);
+              c.drawLine(o, o.translate(10, 7), s);
+              c.drawLine(o.translate(10, 7), o.translate(15, 20), s);
+            } else if (kind == 3) {
+              // Manhole cover.
+              final o = cell.center;
+              p.color = const Color(0xFF7C858A);
+              c.drawCircle(o, 11, p);
+              p.color = const Color(0xFF5F676C);
+              c.drawCircle(o, 9, p);
+              s
+                ..strokeWidth = 1.2
+                ..color = const Color(0x667C858A);
+              for (var k = -6.0; k <= 6; k += 3) {
+                c.drawLine(o.translate(-7, k), o.translate(7, k), s);
+              }
+            }
+          }
         }
       case 'beach':
         p.color = const Color(0x22806020);
@@ -889,8 +945,35 @@ class HazeRoyaleGame extends Game with MatchListener {
     c.drawRect(horizontal ? r.copyWithY(r.top - 16, r.bottom + 16) : r.copyWithX(r.left - 16, r.right + 16), p);
     p.color = const Color(0xFF8E979C);
     c.drawRect(horizontal ? r.copyWithY(r.top - 3, r.bottom + 3) : r.copyWithX(r.left - 3, r.right + 3), p);
+    p.color = const Color(0x55FFFFFF);
+    c.drawRect(horizontal ? r.copyWithY(r.top - 16, r.top - 13) : r.copyWithX(r.left - 16, r.left - 13), p);
     p.color = const Color(0xFF545E63);
     c.drawRect(r, p);
+    // Asphalt grain, worn tyre lanes and the odd oil stain.
+    final rng = math.Random((r.left * 13 + r.top * 7).round());
+    final len0 = horizontal ? r.width : r.height;
+    final cross = horizontal ? r.height : r.width;
+    for (var i = 0; i < len0 * cross / 60; i++) {
+      final along = rng.nextDouble() * len0, across = rng.nextDouble() * cross;
+      final o = horizontal ? Offset(r.left + along, r.top + across) : Offset(r.left + across, r.top + along);
+      p.color = rng.nextBool() ? const Color(0x22000000) : const Color(0x16FFFFFF);
+      c.drawRect(Rect.fromCenter(center: o, width: 2, height: 2), p);
+    }
+    p.color = const Color(0x14000000);
+    for (final lane in [0.22, 0.38, 0.62, 0.78]) {
+      c.drawRect(
+        horizontal
+            ? Rect.fromLTWH(r.left, r.top + cross * lane - 3, r.width, 6)
+            : Rect.fromLTWH(r.left + cross * lane - 3, r.top, 6, r.height),
+        p,
+      );
+    }
+    for (var i = 0; i < len0 / 160; i++) {
+      final along = rng.nextDouble() * len0, across = cross * (0.25 + rng.nextDouble() * 0.5);
+      final o = horizontal ? Offset(r.left + along, r.top + across) : Offset(r.left + across, r.top + along);
+      p.color = const Color(0x22101418);
+      c.drawOval(Rect.fromCenter(center: o, width: 18 + rng.nextDouble() * 14, height: 9 + rng.nextDouble() * 6), p);
+    }
     p.color = const Color(0x18FFFFFF);
     c.drawRect(horizontal ? r.copyWithY(r.top, r.top + 10) : r.copyWithX(r.left, r.left + 10), p);
     p.color = const Color(0xE6FFF59D);

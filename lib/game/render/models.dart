@@ -19,16 +19,27 @@ class ModelLibrary {
   ModelLibrary(this.config, this.map) {
     for (var i = 0; i < map.buildings.length; i++) {
       final b = map.buildings[i];
+      windowLights.add([]);
       buildingFull.add(_building(b, cutaway: false));
       buildingLow.add(_building(b, cutaway: true));
       roofs.add(_roof(b));
     }
+    _placeLamps();
   }
 
   final GameConfig config;
   final MapLayout map;
 
   final List<Mesh> buildingFull = [], buildingLow = [], roofs = [];
+
+  /// Per building: centres of the windows that light up at night (for bloom).
+  final List<List<(double, double, double, double, double)>> windowLights = [];
+
+  /// Street lamps along both pavements of every road: x, y, facing yaw.
+  final List<(double, double, double)> lamps = [];
+
+  /// Height of a lamp head, for its glow.
+  static const double lampHeight = 74;
 
   static const skin = Color(0xFFE0AC7E);
 
@@ -52,11 +63,32 @@ class ModelLibrary {
     _ => const Color(0xFF80604A),
   };
 
+  /// Window storeys as fractions of the wall height (bottom of the glass).
+  static List<double> _storeys(Building b) => b.style == 'town' ? const [0.58, 0.18] : const [0.36];
+
+  /// Glass bottom/top of a storey; town ground floors are taller shopfronts.
+  static (double, double) _windowSpan(Building b, double h, double z0) {
+    final shop = b.style == 'town' && z0 < 0.5;
+    return (h * z0 - (shop ? h * 0.08 : 0), h * (z0 + 0.24));
+  }
+
   Mesh _building(Building b, {required bool cutaway}) {
     final m = MeshBuilder();
     final h = cutaway ? 22.0 : wallHeight(b);
     final wall = wallColor(b);
     final topC = _shade(wall, 0.45);
+    // Walls are stacked in bands that break exactly at the window edges, so
+    // a window never straddles one big wall triangle (painter's sort safe).
+    final breaks = <double>[0];
+    if (!cutaway) {
+      for (final z0 in _storeys(b).reversed) {
+        final (zb, zt) = _windowSpan(b, h, z0);
+        breaks
+          ..add(zb - 2)
+          ..add(zt + 2);
+      }
+    }
+    breaks.add(h);
     for (final w in b.walls) {
       // Split long walls so depth sorting stays correct next to characters.
       final horizontal = w.width >= w.height;
@@ -67,24 +99,32 @@ class ModelLibrary {
         final r = horizontal
             ? Rect.fromLTRB(w.left + w.width * a, w.top, w.left + w.width * c, w.bottom)
             : Rect.fromLTRB(w.left, w.top + w.height * a, w.right, w.top + w.height * c);
-        m.box(r.left, r.top, 0, r.right, r.bottom, h, wall, top: topC);
-        if (!cutaway) {
-          // Base trim (darker skirting).
-          m.box(r.left - 0.8, r.top - 0.8, 0, r.right + 0.8, r.bottom + 0.8, h * 0.1, _shade(wall, 0.25));
+        for (var j = 0; j + 1 < breaks.length; j++) {
+          final last = j + 2 == breaks.length;
+          // A slightly darker band under the eaves reads as a painted cornice.
+          final band = !cutaway && last && b.style == 'town' ? _shade(wall, 0.08) : wall;
+          m.box(r.left, r.top, breaks[j], r.right, r.bottom, breaks[j + 1], band, top: topC, lid: last);
         }
       }
+      if (!cutaway) {
+        // Base trim (darker skirting): low enough to stay one box per wall.
+        m.box(w.left - 0.8, w.top - 0.8, 0, w.right + 0.8, w.bottom + 0.8, h * 0.1, _shade(wall, 0.25));
+      }
     }
-    if (!cutaway) _windows(m, b, h);
+    if (!cutaway) _windows(m, b, h, windowLights.last);
     return m.build();
   }
 
   /// Windows on the outside of every wall (back faces are culled anyway).
-  void _windows(MeshBuilder m, Building b, double h) {
+  /// Each window sorts by its own centre, so frame, sill and glass stay in
+  /// order and never fight the wall behind them. Some light up at night.
+  void _windows(MeshBuilder m, Building b, double h, List<(double, double, double, double, double)> lit) {
     final r = b.rect;
-    final glass = const Color(0xFF9FD3EE);
-    final frame = const Color(0xFFFAFAFA);
-    final shutter = const Color(0xFF8C969C);
-    final storeys = b.style == 'town' ? const [0.58, 0.18] : const [0.36];
+    const glass = Color(0xFF8CCBEA);
+    const frame = Color(0xFFFAFAFA);
+    const shutter = Color(0xFF8C969C);
+    final sill = _shade(wallColor(b), 0.3);
+    final rng = math.Random((r.left * 31 + r.top * 17).round());
     void face(double x0, double y0, double x1, double y1, double nx, double ny) {
       final len = math.sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
       final n = (len / 70).floor();
@@ -96,11 +136,34 @@ class ModelLibrary {
         if (_nearDoor(b, cx, cy)) continue;
         final ux = (x1 - x0) / len, uy = (y1 - y0) / len;
         final half = math.min(len / n * 0.25, 15.0);
-        for (final z0 in storeys) {
+        for (final z0 in _storeys(b)) {
           final shop = b.style == 'town' && z0 < 0.5;
-          final zb = h * z0 - (shop ? h * 0.08 : 0), zt = h * (z0 + 0.24);
-          _panel(m, cx, cy, ux, uy, nx, ny, half + 2, zb - 2, zt + 2, 0.6, frame);
+          final (zb, zt) = _windowSpan(b, h, z0);
+          m.anchor = (x: cx + nx * 1.2, y: cy + ny * 1.2, z: (zb + zt) / 2, bias: 10.0);
+          _panel(m, cx, cy, ux, uy, nx, ny, half + 2.5, zb - 2, zt + 2, 0.6, frame);
+          if (!shop) {
+            // Sill: a little ledge that catches the light.
+            final sx = cx + nx * 2.5, sy = cy + ny * 2.5;
+            final ex = ux.abs() * (half + 4) + nx.abs() * 2.5, ey = uy.abs() * (half + 4) + ny.abs() * 2.5;
+            m.box(sx - ex, sy - ey, zb - 4.5, sx + ex, sy + ey, zb - 2, sill, top: _tint(sill, 0.25));
+          }
+          m.glow = shop ? 0 : (rng.nextDouble() < 0.6 ? 0.9 : 0);
+          if (m.glow > 0) lit.add((cx + nx * 4, cy + ny * 4, (zb + zt) / 2, nx, ny));
           _panel(m, cx, cy, ux, uy, nx, ny, half, zb, zt, 1.2, shop ? shutter : glass);
+          m.glow = 0;
+          if (!shop) {
+            // Mullion so the glass reads as a real window.
+            _panel(m, cx, cy, ux, uy, nx, ny, 0.9, zb, zt, 1.5, frame);
+          } else {
+            // Shopfront awning in the roof colour.
+            final w0 = half + 6;
+            final a = m.vert(cx - ux * w0 + nx * 0.5, cy - uy * w0 + ny * 0.5, zt + 7);
+            final bb = m.vert(cx + ux * w0 + nx * 0.5, cy + uy * w0 + ny * 0.5, zt + 7);
+            final d = m.vert(cx + ux * w0 + nx * 16, cy + uy * w0 + ny * 16, zt - 1);
+            final e = m.vert(cx - ux * w0 + nx * 16, cy - uy * w0 + ny * 16, zt - 1);
+            m.quad(a, bb, d, e, b.roofColor, cx - nx * 20, cy - ny * 20, zt - 30);
+          }
+          m.anchor = null;
         }
       }
     }
@@ -136,6 +199,8 @@ class ModelLibrary {
     m.quad(a, b, d, e, c, ox - nx * 10, oy - ny * 10, (z0 + z1) / 2);
   }
 
+  /// Gabled roof. It is drawn with one shared depth key, so triangles land in
+  /// the order they are added here: fascia, tile rows, gables, ridge, extras.
   Mesh _roof(Building b) {
     final m = MeshBuilder();
     final r = b.rect.inflate(7);
@@ -143,58 +208,124 @@ class ModelLibrary {
     final ridge = h + math.min(r.width, r.height) * 0.3;
     final c = b.roofColor;
     final cap = _shade(c, 0.3);
-    if (r.width >= r.height) {
-      final mid = r.center.dy;
-      const strips = 4;
-      for (var k = 0; k < strips; k++) {
-        final x0 = r.left + r.width * k / strips, x1 = r.left + r.width * (k + 1) / strips;
-        final cx = (x0 + x1) / 2;
-        // North slope
-        var a = m.vert(x0, r.top, h), bb = m.vert(x1, r.top, h), d = m.vert(x1, mid, ridge), e = m.vert(x0, mid, ridge);
-        m.quad(a, bb, d, e, c, cx, mid, h - 40);
-        // South slope
-        a = m.vert(x0, mid, ridge);
-        bb = m.vert(x1, mid, ridge);
-        d = m.vert(x1, r.bottom, h);
-        e = m.vert(x0, r.bottom, h);
-        m.quad(a, bb, d, e, c, cx, mid, h - 40);
-      }
-      for (final x in [r.left, r.right]) {
-        final a = m.vert(x, r.top, h), bb = m.vert(x, r.bottom, h), d = m.vert(x, mid, ridge);
-        m.tri(a, bb, d, _shade(c, 0.15), r.center.dx, mid, h);
-      }
-      m.box(r.left, mid - 2.5, ridge - 1, r.right, mid + 2.5, ridge + 2.5, cap);
+    final fascia = _shade(c, 0.45);
+    final along = r.width >= r.height;
+    // Fascia boards under the eaves.
+    if (along) {
+      m.box(r.left, r.top, h - 4, r.right, r.top + 2, h, fascia, lid: false);
+      m.box(r.left, r.bottom - 2, h - 4, r.right, r.bottom, h, fascia, lid: false);
     } else {
-      final mid = r.center.dx;
-      const strips = 4;
-      for (var k = 0; k < strips; k++) {
-        final y0 = r.top + r.height * k / strips, y1 = r.top + r.height * (k + 1) / strips;
-        final cy = (y0 + y1) / 2;
-        var a = m.vert(r.left, y0, h),
-            bb = m.vert(r.left, y1, h),
-            d = m.vert(mid, y1, ridge),
-            e = m.vert(mid, y0, ridge);
-        m.quad(a, bb, d, e, c, mid, cy, h - 40);
-        a = m.vert(mid, y0, ridge);
-        bb = m.vert(mid, y1, ridge);
-        d = m.vert(r.right, y1, h);
-        e = m.vert(r.right, y0, h);
-        m.quad(a, bb, d, e, c, mid, cy, h - 40);
-      }
-      for (final y in [r.top, r.bottom]) {
-        final a = m.vert(r.left, y, h), bb = m.vert(r.right, y, h), d = m.vert(mid, y, ridge);
-        m.tri(a, bb, d, _shade(c, 0.15), mid, r.center.dy, h);
-      }
-      m.box(mid - 2.5, r.top, ridge - 1, mid + 2.5, r.bottom, ridge + 2.5, cap);
+      m.box(r.left, r.top, h - 4, r.left + 2, r.bottom, h, fascia, lid: false);
+      m.box(r.right - 2, r.top, h - 4, r.right, r.bottom, h, fascia, lid: false);
     }
+    // Tile rows parallel to the ridge, alternating shade, darker at the eave.
+    const rows = 5;
+    final rowCols = [
+      for (var k = 0; k < rows; k++) k == 0 ? _shade(c, 0.16) : (k.isOdd ? _shade(c, 0.05) : _tint(c, 0.04)),
+    ];
+    final cx0 = r.center.dx, cy0 = r.center.dy;
+    // One slope from the eave line at [from] up to the ridge line at [mid].
+    void slope(double from, double mid) {
+      for (var k = 0; k < rows; k++) {
+        final t0 = k / rows, t1 = (k + 1) / rows;
+        final za = h + (ridge - h) * t0, zb = h + (ridge - h) * t1;
+        final p0 = from + (mid - from) * t0, p1 = from + (mid - from) * t1;
+        final int a, bb, d, e;
+        if (along) {
+          a = m.vert(r.left, p0, za);
+          bb = m.vert(r.right, p0, za);
+          d = m.vert(r.right, p1, zb);
+          e = m.vert(r.left, p1, zb);
+        } else {
+          a = m.vert(p0, r.top, za);
+          bb = m.vert(p0, r.bottom, za);
+          d = m.vert(p1, r.bottom, zb);
+          e = m.vert(p1, r.top, zb);
+        }
+        m.quad(a, bb, d, e, rowCols[k], cx0, cy0, h - 40);
+      }
+    }
+
+    if (along) {
+      slope(r.top, cy0);
+      slope(r.bottom, cy0);
+      for (final x in [r.left, r.right]) {
+        final a = m.vert(x, r.top, h), bb = m.vert(x, r.bottom, h), d = m.vert(x, cy0, ridge);
+        m.tri(a, bb, d, _shade(c, 0.15), cx0, cy0, h);
+      }
+      m.box(r.left, cy0 - 2.5, ridge - 1, r.right, cy0 + 2.5, ridge + 2.5, cap);
+    } else {
+      slope(r.left, cx0);
+      slope(r.right, cx0);
+      for (final y in [r.top, r.bottom]) {
+        final a = m.vert(r.left, y, h), bb = m.vert(r.right, y, h), d = m.vert(cx0, y, ridge);
+        m.tri(a, bb, d, _shade(c, 0.15), cx0, cy0, h);
+      }
+      m.box(cx0 - 2.5, r.top, ridge - 1, cx0 + 2.5, r.bottom, ridge + 2.5, cap);
+    }
+    // Roof height at a point, so fixtures sit on the slope instead of
+    // standing on the ceiling (the shared depth key draws them whole).
+    double slopeZ(double x, double y) {
+      final t = along ? 1 - (y - cy0).abs() / (r.height / 2) : 1 - (x - cx0).abs() / (r.width / 2);
+      return h + (ridge - h) * t.clamp(0.0, 1.0);
+    }
+
+    // Fixtures go on the slope facing south (or east), halfway up.
+    final fx = along ? cx0 : cx0 + r.width * 0.22, fy = along ? cy0 + r.height * 0.22 : cy0;
     if (b.style == 'town') {
-      // Air-con unit and water tank on shop-house roofs.
-      final p = b.rect.center;
-      m.box(p.dx - 30, p.dy + 4, h, p.dx - 12, p.dy + 18, ridge - 6, const Color(0xFFB0BEC5));
-      m.cylinder(p.dx + 22, p.dy - 6, ridge - 10, ridge + 6, 7, 7, 6, const Color(0xFF90A4AE));
+      // Air-con unit and a water tank on shop-house roofs.
+      final ax = fx - (along ? 26 : 0), ay = fy - (along ? 0 : 26);
+      final za = slopeZ(ax, along ? ay - 7 : ay);
+      m.box(ax - 9, ay - 7, za - 2, ax + 9, ay + 7, za + 11, const Color(0xFFB0BEC5), top: const Color(0xFFCFD8DC));
+      m.box(ax - 6, ay - 4.5, za + 11, ax + 6, ay + 4.5, za + 11.6, const Color(0xFF78909C));
+      final tx = fx + (along ? 28 : 0), ty = fy + (along ? 0 : 28);
+      final zt = slopeZ(tx, along ? ty - 7 : ty);
+      m.cylinder(tx, ty, zt - 2, zt + 16, 7, 7, 6, const Color(0xFF90A4AE), cap: const Color(0xFFB0BEC5));
+    } else if (b.style == 'kampung') {
+      // A small chimney vent poking out of the slope.
+      final zc = slopeZ(fx, along ? fy - 5 : fy);
+      m.box(fx - 5, fy - 5, zc - 2, fx + 5, fy + 5, zc + 16, const Color(0xFF8D6E63), top: const Color(0xFF4E342E));
     }
     return m.build();
   }
+
+  // ------------------------------------------------------------ street lamps
+
+  void _placeLamps() {
+    const spacing = 250.0;
+    for (final d in map.decor) {
+      if (d.kind != 'road') continue;
+      final r = d.rect;
+      final horizontal = r.width > r.height;
+      final len = horizontal ? r.width : r.height;
+      for (var t = spacing * 0.5; t < len; t += spacing) {
+        for (final side in [-1.0, 1.0]) {
+          final x = horizontal ? r.left + t : (side < 0 ? r.left - 10 : r.right + 10);
+          final y = horizontal ? (side < 0 ? r.top - 10 : r.bottom + 10) : r.top + t;
+          // Not in a junction, inside a building or on top of another road.
+          final spot = Rect.fromCircle(center: Offset(x, y), radius: 14);
+          if (map.buildings.any((b) => b.rect.inflate(10).overlaps(spot))) continue;
+          if (map.decor.any((o) => o.kind == 'road' && !identical(o, d) && o.rect.inflate(30).overlaps(spot))) continue;
+          // The arm reaches out over the road.
+          final yaw = horizontal ? (side < 0 ? math.pi / 2 : -math.pi / 2) : (side < 0 ? 0.0 : math.pi);
+          lamps.add((x, y, yaw));
+        }
+      }
+    }
+  }
+
+  /// A street lamp: dark pole, a short arm over the road and a lit head.
+  late final Mesh lampPost = () {
+    final m = MeshBuilder();
+    const pole = Color(0xFF455A64);
+    m.box(-1.8, -1.8, 0, 1.8, 1.8, lampHeight + 4, pole);
+    m.box(0, -1.4, lampHeight + 2, 16, 1.4, lampHeight + 4.5, pole);
+    m.box(10, -3.5, lampHeight - 1, 20, 3.5, lampHeight + 3, const Color(0xFF37474F));
+    m.glow = 1;
+    m.box(11, -2.8, lampHeight - 2.2, 19, 2.8, lampHeight - 0.5, const Color(0xFFFFF3C4), bottom: true);
+    m.glow = 0;
+    return m.build();
+  }();
 
   // ------------------------------------------------- instanced nature (cubes)
 

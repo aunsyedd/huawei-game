@@ -318,6 +318,15 @@ class PerspectiveRenderer {
       _groundGlows.add(Sprites.glow, l.x, l.y, 64 * pulse, _argb(0.5, color.toARGB32()));
       _groundShadows.add(Sprites.shadowOval, l.x + 3, l.y + 3, 30, 0xFFFFFFFF);
     }
+    // Warm pools of lamplight on the pavement at night.
+    final glowK = ((light.night - 0.15) / 0.5).clamp(0.0, 1.0);
+    if (glowK > 0) {
+      for (final (x, y, yaw) in models.lamps) {
+        final gx = x + math.cos(yaw) * 18, gy = y + math.sin(yaw) * 18;
+        if (!cull.contains(Offset(gx, gy))) continue;
+        _groundGlows.add(Sprites.glow, gx, gy, 230, _argb(0.42 * glowK, 0xFFB45A));
+      }
+    }
     _groundDecals.draw(canvas, _atlas, _img);
     _groundShadows.draw(canvas, _atlas, _img);
     _groundGlows.draw(canvas, _atlas, _additive);
@@ -369,6 +378,7 @@ class PerspectiveRenderer {
     double alpha = 1,
     double flash = 0,
     double haze = 0,
+    double? depthKey,
   }) {
     final vc = m.vertexCount;
     if (_sx.length < vc) {
@@ -406,6 +416,8 @@ class PerspectiveRenderer {
     }
     final eyeX = cam.eyeX, eyeY = cam.eyeY, eyeZ = cam.eyeZ;
     final t = m.tris, n = m.normals, col = m.colors;
+    final anchors = m.anchors, glows = m.glow;
+    final night = light.night;
     final tc = m.triCount;
     final fog = light.fog;
     final fogR = ((fog.toARGB32() >> 16) & 0xFF).toDouble();
@@ -421,7 +433,15 @@ class PerspectiveRenderer {
           my = (_wy[a] + _wy[b] + _wy[c]) / 3,
           mz = (_wz[a] + _wz[b] + _wz[c]) / 3;
       if (nx * (eyeX - mx) + ny * (eyeY - my) + nz * (eyeZ - mz) <= 0) continue; // faces away
-      final depth = (wa + wb + wc) / 3;
+      var depth = depthKey ?? (wa + wb + wc) / 3;
+      if (anchors != null && depthKey == null) {
+        final ax = anchors[k * 4];
+        if (!ax.isNaN) {
+          final ay = anchors[k * 4 + 1];
+          final wx = px + (ax * cs - ay * sn) * scale - tx, wy = py + (ax * sn + ay * cs) * scale - ty;
+          depth = dist - (wx * nx0 + wy * ny0 + (pz + anchors[k * 4 + 2] * scale) * nz0) - anchors[k * 4 + 3];
+        }
+      }
       final diffuse = math.max(0.0, nx * light.lx + ny * light.ly + nz * light.lz);
       final sky = 0.1 * math.max(0.0, nz);
       final base = col[k];
@@ -432,6 +452,15 @@ class PerspectiveRenderer {
         r += (255 - r) * flash;
         gr += (255 - gr) * flash;
         bl += (255 - bl) * flash;
+      }
+      if (glows != null && night > 0.05) {
+        // Lit windows: warm lamplight that ignores the sun.
+        final gk = glows[k] * night;
+        if (gk > 0) {
+          r += (255 - r) * gk;
+          gr += (205 - gr) * gk;
+          bl += (120 - bl) * gk;
+        }
       }
       if (haze > 0) {
         r += (150 - r) * haze;
@@ -495,7 +524,38 @@ class PerspectiveRenderer {
       final hide = !inside && _occludesFocus(b.rect.left, b.rect.right, b.rect.bottom, h, f.x, f.y);
       final alpha = hide ? 0.38 : 1.0;
       _emit(inside ? models.buildingLow[i] : models.buildingFull[i], 0, 0, 0, alpha: alpha);
-      if (!inside) _emit(models.roofs[i], 0, 0, 0, alpha: hide ? 0.3 : 1.0);
+      if (!inside) {
+        // One shared depth (the nearest eave corner), so the roof always
+        // lands on top of its own walls instead of interleaving with them.
+        final r = b.rect.inflate(8);
+        final zh = h + 1;
+        final key = math.min(
+          math.min(cam.depthOf(r.left, r.top, zh), cam.depthOf(r.right, r.top, zh)),
+          math.min(cam.depthOf(r.left, r.bottom, zh), cam.depthOf(r.right, r.bottom, zh)),
+        );
+        _emit(models.roofs[i], 0, 0, 0, alpha: hide ? 0.3 : 1.0, depthKey: key - 0.5);
+      }
+    }
+
+    // Street lamps, plus a soft bloom on them and on lit windows at night.
+    final glowK = ((light.night - 0.15) / 0.5).clamp(0.0, 1.0);
+    final lampDist = cam.distance * 1.7;
+    for (final (x, y, yaw) in models.lamps) {
+      if (!_inView(cull, x, y) || cam.depthOf(x, y, 0) > lampDist) continue;
+      _emit(models.lampPost, x, y, 0, yaw: yaw);
+      if (glowK > 0 && project(x + math.cos(yaw) * 15, y + math.sin(yaw) * 15, ModelLibrary.lampHeight - 2)) {
+        _overlayGlows.add(Sprites.glow, _px, _py, 70 * _ps, _argb(0.75 * glowK, 0xFFD27A));
+      }
+    }
+    if (glowK > 0 && _q >= 2) {
+      for (var i = 0; i < map.buildings.length; i++) {
+        if (!map.buildings[i].rect.overlaps(cull) || map.buildings[i].contains(f.x, f.y)) continue;
+        for (final (x, y, z, nx, ny) in models.windowLights[i]) {
+          // Only windows turned towards the eye; the rest are behind the roof.
+          if (nx * (cam.eyeX - x) + ny * (cam.eyeY - y) <= 0) continue;
+          if (project(x, y, z)) _overlayGlows.add(Sprites.glow, _px, _py, 46 * _ps, _argb(0.45 * glowK, 0xFFC870));
+        }
+      }
     }
 
     // The voxel layer.
