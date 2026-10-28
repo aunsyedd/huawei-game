@@ -97,6 +97,14 @@ class HazeRoyaleGame extends Game with MatchListener {
   double timeOfDay = 0.40;
 
   double _shake = 0, _shakeTime = 0;
+
+  /// Follow-camera spring state: velocity of the look-at point and the
+  /// smoothed look-ahead offset in front of the moving player.
+  double _camVx = 0, _camVy = 0, _leadX = 0, _leadY = 0;
+
+  /// Stick input after easing, so the player accelerates instead of jumping
+  /// to full speed (and stops with a short glide).
+  final Vector2 _smoothMove = Vector2.zero();
   final _rng = math.Random();
   double _hudAccum = 0;
 
@@ -138,7 +146,7 @@ class HazeRoyaleGame extends Game with MatchListener {
     super.onGameResize(size);
     viewW = size.x;
     viewH = size.y;
-    zoom = math.min(viewW / 1100, viewH / 620).clamp(0.45, 2.0);
+    zoom = math.min(viewW / 1020, viewH / 575).clamp(0.45, 2.0);
     renderer.onResize();
   }
 
@@ -192,13 +200,21 @@ class HazeRoyaleGame extends Game with MatchListener {
     if (p.alive && p.brain == null && sim.phase == MatchPhase.running) {
       // Sticks are read relative to where the camera looks, so turning the
       // camera never inverts the controls.
+      final ease = 1 - math.exp(-dt * (moveInput.length2 > _smoothMove.length2 ? 14 : 18));
+      _smoothMove.x += (moveInput.x - _smoothMove.x) * ease;
+      _smoothMove.y += (moveInput.y - _smoothMove.y) * ease;
+      if (moveInput.length2 == 0 && _smoothMove.length2 < 0.002) _smoothMove.setZero();
       final cs = math.cos(camYaw), sn = math.sin(camYaw);
-      p.moveInput.setValues(moveInput.x * cs - moveInput.y * sn, moveInput.x * sn + moveInput.y * cs);
+      final mx = _smoothMove.x, my = _smoothMove.y;
+      p.moveInput.setValues(mx * cs - my * sn, mx * sn + my * cs);
       if (aimInput.length2 > 0.0025) {
         p.aimAngle = math.atan2(aimInput.x * sn + aimInput.y * cs, aimInput.x * cs - aimInput.y * sn);
       } else if (moveInput.length2 > 0.01) {
-        p.aimAngle = math.atan2(p.moveInput.y, p.moveInput.x);
+        final tx = moveInput.x * cs - moveInput.y * sn, ty = moveInput.x * sn + moveInput.y * cs;
+        p.aimAngle = math.atan2(ty, tx);
       }
+    } else {
+      _smoothMove.setZero();
       p.wantFire = fireHeld && !buildMode;
       p.wantMine = mineHeld;
     }
@@ -206,12 +222,7 @@ class HazeRoyaleGame extends Game with MatchListener {
     if (sim.phase == MatchPhase.ended) sim.effects.update(dt);
     if (phase.value != sim.phase) phase.value = sim.phase;
 
-    final f = sim.focus.pos;
-    if (sim.phase != MatchPhase.dropping) {
-      final k = math.min(1.0, dt * 8);
-      camX += (f.x - camX) * k;
-      camY += (f.y - camY) * k;
-    }
+    if (sim.phase != MatchPhase.dropping) _followFocus(dt);
     _updateCamera(dt);
     _updateSky(dt);
     if (_shakeTime > 0) _shakeTime -= dt;
@@ -246,7 +257,7 @@ class HazeRoyaleGame extends Game with MatchListener {
 
   /// Snaps the camera back behind the player (double tap on the look pad).
   void recentreCamera() {
-    _manualCam = 0;
+    _manualCam = 0.8; // long enough for the swing to finish before follow resumes
     final v = sim.focus.vel;
     _yawGoal = v.length2 > 100 ? math.atan2(v.x, -v.y) : 0;
     _tiltGoal = camTiltSetting;
@@ -262,17 +273,57 @@ class HazeRoyaleGame extends Game with MatchListener {
     return a;
   }
 
+  /// Critically damped spring towards the focus plus a short look-ahead, so
+  /// the view glides after the player (no rubber-banding, no jitter when the
+  /// frame time wobbles) and shows a bit more of where they are heading.
+  void _followFocus(double dt) {
+    final f = sim.focus;
+    final v = f.vel;
+    final leadGoalX = (v.x * 0.22).clamp(-85.0, 85.0), leadGoalY = (v.y * 0.22).clamp(-85.0, 85.0);
+    final lk = 1 - math.exp(-dt * 2.6);
+    _leadX += (leadGoalX - _leadX) * lk;
+    _leadY += (leadGoalY - _leadY) * lk;
+    final gx = f.pos.x + _leadX, gy = f.pos.y + _leadY;
+    if ((gx - camX).abs() > 900 || (gy - camY).abs() > 900) {
+      // Spectating someone far away: cut instead of flying across the island.
+      camX = gx;
+      camY = gy;
+      _camVx = _camVy = 0;
+      return;
+    }
+    const omega = 9.0; // spring stiffness (higher = tighter)
+    final x = omega * dt;
+    final e = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+    final cx = camX - gx, cy = camY - gy;
+    final tx = (_camVx + omega * cx) * dt, ty = (_camVy + omega * cy) * dt;
+    _camVx = (_camVx - omega * tx) * e;
+    _camVy = (_camVy - omega * ty) * e;
+    camX = gx + (cx + tx) * e;
+    camY = gy + (cy + ty) * e;
+  }
+
   void _updateCamera(double dt) {
+    var rate = 9.0;
     if (_manualCam > 0) {
       _manualCam -= dt;
     } else if (cameraFollow) {
-      final v = sim.focus.vel;
-      if (v.length2 > 2500) _yawGoal = math.atan2(v.x, -v.y);
+      // Only swing round when the player is pushing mostly forward. Steering
+      // sideways or backing up must not turn the view: the stick is read
+      // relative to the camera, so that would spin it in circles.
+      final fwd = -moveInput.y, side = moveInput.x;
+      if (fwd > 0.35 && fwd > side.abs() * 1.2 && sim.focus.vel.length2 > 2500) {
+        final v = sim.focus.vel;
+        _yawGoal = math.atan2(v.x, -v.y);
+        rate = 1.4;
+      } else {
+        _yawGoal = camYaw;
+      }
     } else {
       _yawGoal = 0;
+      rate = 3;
     }
-    camYaw = _wrap(camYaw + _wrap(_yawGoal - camYaw) * math.min(1.0, dt * (_manualCam > 0 ? 9 : 2.2)));
-    camTilt += (_tiltGoal - camTilt) * math.min(1.0, dt * 6);
+    camYaw = _wrap(camYaw + _wrap(_yawGoal - camYaw) * (1 - math.exp(-dt * rate)));
+    camTilt += (_tiltGoal - camTilt) * (1 - math.exp(-dt * 6));
   }
 
   /// Royale slides from afternoon towards a smoky dusk; Blok Craft runs a
@@ -518,8 +569,10 @@ class HazeRoyaleGame extends Game with MatchListener {
     if (viewW == 0) return;
     var sx = camX, sy = camY;
     if (_shakeTime > 0) {
-      sx += (_rng.nextDouble() - 0.5) * _shake * 2 / zoom;
-      sy += (_rng.nextDouble() - 0.5) * _shake * 2 / zoom;
+      // Smooth decaying wobble instead of per-frame random jumps.
+      final k = _shake * math.min(1.0, _shakeTime * 4) / zoom;
+      sx += (math.sin(clock * 47) + math.sin(clock * 29 + 1.3) * 0.6) * k * 0.7;
+      sy += (math.cos(clock * 41 + 0.7) + math.sin(clock * 23) * 0.6) * k * 0.7;
     } else {
       _shake = 0;
     }
@@ -587,11 +640,11 @@ class HazeRoyaleGame extends Game with MatchListener {
   }
 
   static const _areaColors = {
-    'forest': Color(0xFF3B7A37),
-    'plantation': Color(0xFF79AD47),
-    'kampung': Color(0xFF97C862),
-    'town': Color(0xFFBCC2C5),
-    'beach': Color(0xFFEBD8A2),
+    'forest': Color(0xFF2F7A35),
+    'plantation': Color(0xFF5FA23E),
+    'kampung': Color(0xFF6DB84A),
+    'town': Color(0xFFB4BCC2),
+    'beach': Color(0xFFF0D9A0),
   };
 
   /// Static ground art for one 500x500 chunk, recorded once and replayed.
@@ -623,6 +676,7 @@ class HazeRoyaleGame extends Game with MatchListener {
       final area = a.rect.intersect(clip.inflate(10));
       c.save();
       c.clipRect(a.rect);
+      _groundPatches(c, a.type, area, base, p);
       _groundDetail(c, a.type, area, rng, p, s);
       c.restore();
     }
@@ -704,6 +758,40 @@ class HazeRoyaleGame extends Game with MatchListener {
       ..strokeWidth = 3;
     c.drawRect(land, s);
     return rec.endRecording();
+  }
+
+  /// Large soft light/dark patches so open ground reads as rolling, sunlit
+  /// terrain instead of one flat colour. Positions come from a world-space
+  /// hash, so neighbouring chunks agree and there are no seams.
+  void _groundPatches(Canvas c, String type, Rect area, Color base, Paint p) {
+    if (area.isEmpty || type == 'town') return;
+    const cell = 160.0;
+    final light = Color.lerp(base, const Color(0xFFFFF4C0), type == 'beach' ? 0.35 : 0.22)!;
+    final dark = Color.lerp(base, const Color(0xFF0F3B1A), type == 'beach' ? 0.12 : 0.30)!;
+    final gx0 = (area.left / cell).floor() - 1, gx1 = (area.right / cell).ceil() + 1;
+    final gy0 = (area.top / cell).floor() - 1, gy1 = (area.bottom / cell).ceil() + 1;
+    for (var gy = gy0; gy <= gy1; gy++) {
+      for (var gx = gx0; gx <= gx1; gx++) {
+        var h = (gx * 73856093) ^ (gy * 19349663) ^ sim.map.config.seed;
+        h = (h ^ (h >> 13)) * 1274126177;
+        double next() {
+          h = (h * 1103515245 + 12345) & 0x7fffffff;
+          return h / 0x7fffffff;
+        }
+
+        final x = (gx + next()) * cell, y = (gy + next()) * cell;
+        final r = cell * (0.7 + next() * 0.9);
+        final isLight = next() < 0.5;
+        final col = isLight ? light : dark;
+        final o = Offset(x, y);
+        p.shader = Gradient.radial(o, r, [
+          col.withValues(alpha: isLight ? 0.38 : 0.30),
+          col.withValues(alpha: 0),
+        ]);
+        c.drawCircle(o, r, p);
+      }
+    }
+    p.shader = null;
   }
 
   void _groundDetail(Canvas c, String type, Rect area, math.Random rng, Paint p, Paint s) {

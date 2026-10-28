@@ -77,13 +77,18 @@ class PerspectiveRenderer {
 
   Paint? _vignette;
   double _vignetteFor = -1;
+  Paint? _grade, _gradeEdge;
 
   Paint _fill(Color c) => _p..color = c;
   Paint _line(Color c, double w) => _s
     ..color = c
     ..strokeWidth = w;
 
-  void onResize() => _vignette = null;
+  void onResize() {
+    _vignette = null;
+    _grade = null;
+    _gradeEdge = null;
+  }
 
   int get _q => game.quality;
 
@@ -114,7 +119,7 @@ class PerspectiveRenderer {
   double get hazeAmount {
     final sim = game.sim;
     if (!sim.hazeActive) return 0.06;
-    return (0.26 + 0.1 * sim.zone.phaseIndex).clamp(0.0, 0.8);
+    return (0.16 + 0.12 * sim.zone.phaseIndex).clamp(0.0, 0.8);
   }
 
   // --------------------------------------------------------------- frame
@@ -478,7 +483,7 @@ class PerspectiveRenderer {
     final map = sim.map;
     final f = sim.focus.pos;
     final t = game.clock;
-    _fogNear = cam.distance * 0.92;
+    _fogNear = cam.distance * 1.05;
     _fogFar = cam.distance * (1.6 + 1.9 / math.max(0.25, cam.sinT));
     final meshShadows = _q >= 3;
 
@@ -783,9 +788,29 @@ class PerspectiveRenderer {
     final sim = g.sim;
     if (sim.phase == MatchPhase.dropping) return;
 
+    if (_q >= 1) {
+      // Cinematic grade: warm sunlight washing in from the top-left and a soft
+      // dark frame that pulls the eye to the middle. Two cached-gradient rects.
+      _grade ??= Paint()
+        ..blendMode = BlendMode.softLight
+        ..shader = Gradient.linear(Offset.zero, Offset(g.viewW, g.viewH), const [
+          Color(0x88FFCF70),
+          Color(0x00FFFFFF),
+          Color(0x55304C9C),
+        ], const [0, 0.5, 1]);
+      _gradeEdge ??= Paint()
+        ..shader = Gradient.radial(rect.center, rect.longestSide * 0.62, const [
+          Color(0x00000000),
+          Color(0x00000000),
+          Color(0x5A081018),
+        ], const [0, 0.62, 1]);
+      canvas.drawRect(rect, _grade!);
+      canvas.drawRect(rect, _gradeEdge!);
+    }
+
     if (_q >= 1 && sim.hazeActive) {
       // The far (top) part of the view fades into hazy air, thicker each phase.
-      final strength = (0.18 + 0.06 * sim.zone.phaseIndex).clamp(0.0, 0.45);
+      final strength = (0.10 + 0.08 * sim.zone.phaseIndex).clamp(0.0, 0.45);
       if (_vignetteFor != strength || _vignette == null) {
         _vignetteFor = strength;
         _vignette = Paint()

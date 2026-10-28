@@ -72,11 +72,13 @@ class Lighting {
     lz /= len;
 
     // Warm sun, cool blue night, orange dusk, dirty beige haze.
-    final dr = _lerp(0.18, 0.72, day) + dusk * 0.30 + haze * 0.05;
-    final dg = _lerp(0.20, 0.70, day) + dusk * 0.14 - haze * 0.02;
-    final db = _lerp(0.30, 0.64, day) - dusk * 0.06 - haze * 0.10;
-    final ar = _lerp(0.26, 0.54, day) + haze * 0.10 + dusk * 0.06;
-    final ag = _lerp(0.28, 0.55, day) + haze * 0.04;
+    // Stronger warm key light over a cooler, dimmer sky fill: sunlit faces
+    // glow and shaded sides fall off, so blocks read as solid 3D shapes.
+    final dr = _lerp(0.18, 0.86, day) + dusk * 0.30 + haze * 0.05;
+    final dg = _lerp(0.20, 0.78, day) + dusk * 0.14 - haze * 0.02;
+    final db = _lerp(0.30, 0.62, day) - dusk * 0.06 - haze * 0.10;
+    final ar = _lerp(0.26, 0.44, day) + haze * 0.10 + dusk * 0.06;
+    final ag = _lerp(0.28, 0.48, day) + haze * 0.04;
     final ab = _lerp(0.42, 0.58, day) - haze * 0.08;
 
     return Lighting(
