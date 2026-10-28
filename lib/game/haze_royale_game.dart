@@ -213,10 +213,10 @@ class HazeRoyaleGame extends Game with MatchListener {
         final tx = moveInput.x * cs - moveInput.y * sn, ty = moveInput.x * sn + moveInput.y * cs;
         p.aimAngle = math.atan2(ty, tx);
       }
-    } else {
-      _smoothMove.setZero();
       p.wantFire = fireHeld && !buildMode;
       p.wantMine = mineHeld;
+    } else {
+      _smoothMove.setZero();
     }
     sim.update(dt);
     if (sim.phase == MatchPhase.ended) sim.effects.update(dt);
