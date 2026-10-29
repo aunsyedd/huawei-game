@@ -19,6 +19,8 @@ Future<void> main() async {
   final prefs = await SharedPreferences.getInstance();
   final hms = await HmsDetector().isHmsAvailable();
   final services = HmsServices.create(hmsAvailable: hms, prefs: prefs);
+  // Signed in last time? Come back signed in (silent, capped at a few seconds).
+  await services.account.restore();
   services.push.init();
   final audio = GameAudioService(
     sfxVolume: prefs.getDouble('sound') ?? 0.8,

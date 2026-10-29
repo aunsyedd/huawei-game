@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- HUAWEI ID sign-in talks to HUAWEI servers. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="Haze Royale"
         android:name="${applicationName}"
@@ -31,6 +33,10 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- AppGallery Connect app id, filled in from agconnect-services.json at build time. -->
+        <meta-data
+            android:name="com.huawei.hms.client.appid"
+            android:value="appid=${hmsAppId}" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

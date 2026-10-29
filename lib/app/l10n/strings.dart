@@ -21,6 +21,11 @@ class S {
     'leaderboard': {'en': 'Leaderboard', 'ms': 'Papan Pendahulu'},
     'settings': {'en': 'Settings', 'ms': 'Tetapan'},
     'sign_in': {'en': 'Sign in', 'ms': 'Log masuk'},
+    'sign_in_huawei': {'en': 'Sign in with HUAWEI ID', 'ms': 'Log masuk dengan HUAWEI ID'},
+    'sign_in_failed': {
+      'en': 'HUAWEI ID sign-in failed (code {code}). You can keep playing as a guest.',
+      'ms': 'Log masuk HUAWEI ID gagal (kod {code}). Anda boleh terus bermain sebagai tetamu.',
+    },
     'sign_out': {'en': 'Sign out', 'ms': 'Log keluar'},
     'signed_in_as': {'en': 'Signed in as {name}', 'ms': 'Log masuk sebagai {name}'},
     'guest': {'en': 'Playing as guest', 'ms': 'Bermain sebagai tetamu'},

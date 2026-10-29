@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/l10n/strings.dart';
 import '../../app/responsive.dart';
 import '../../app/theme.dart';
+import '../../services/hms/account_service.dart';
 import '../../services/hms/air_quality_service.dart';
 import '../../state/providers.dart';
 import 'progress_card.dart';
@@ -51,6 +52,19 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with SingleTickerProvid
           content: Text(s('daily_bonus', {'xp': bonus, 'n': ref.read(progressProvider).streak})),
           duration: const Duration(seconds: 3),
         ),
+      );
+    }
+  }
+
+  /// HUAWEI ID sign-in (or the guest stand-in without HMS); failures stay a snackbar.
+  Future<void> _signIn() async {
+    final s = S.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(accountProvider.notifier).signIn();
+    } on AccountException catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(s('sign_in_failed', {'code': e.code})), duration: const Duration(seconds: 4)),
       );
     }
   }
@@ -221,10 +235,14 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with SingleTickerProvid
                               Align(
                                 alignment: Alignment.centerRight,
                                 child: TextButton(
-                                  onPressed: () => account == null
-                                      ? ref.read(accountProvider.notifier).signIn()
-                                      : ref.read(accountProvider.notifier).signOut(),
-                                  child: Text(account == null ? s('sign_in') : s('sign_out')),
+                                  onPressed: () => account == null ? _signIn() : ref.read(accountProvider.notifier).signOut(),
+                                  child: Text(
+                                    account != null
+                                        ? s('sign_out')
+                                        : hms
+                                        ? s('sign_in_huawei')
+                                        : s('sign_in'),
+                                  ),
                                 ),
                               ),
                               const Divider(),

@@ -106,5 +106,6 @@ in `vercel.json`. Keep those two files. Claude Code is intentionally NOT connect
 plugin or MCP): deploy by pushing to main, and don't set up Vercel access again unless the user asks.
 
 ## Status / open items
-- HMS kits (Account, Game Service, Push) are wired as interfaces + fakes only; real implementations come
-  after the 16–18 Oct HMS workshop (see HMS_SETUP.md).
+- Account Kit (HUAWEI ID sign-in) is live via the Android SDK in `MainActivity.kt`; it needs
+  `android/app/agconnect-services.json` (gitignored) to actually sign in. Game Service and Push are still
+  interfaces + fakes (see HMS_SETUP.md).

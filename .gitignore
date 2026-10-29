@@ -54,3 +54,6 @@ app.*.map.json
 
 # Upload-ready zips from tool/package.py
 /dist/
+
+# Competition hand-in files (APK, PDFs, slides)
+/submission/

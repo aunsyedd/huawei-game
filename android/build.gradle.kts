@@ -2,6 +2,8 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // HUAWEI Mobile Services (Account Kit).
+        maven { url = uri("https://developer.huawei.com/repo/") }
     }
 }
 

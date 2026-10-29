@@ -16,13 +16,12 @@ class HmsServices {
   });
 
   /// Picks real HMS implementations when HMS Core is present, fakes otherwise.
-  /// The real kits are added after the HMS workshop; see HMS_SETUP.md.
+  /// Account Kit is live; Game Service and Push still use their fakes (HMS_SETUP.md).
   factory HmsServices.create({required bool hmsAvailable, required SharedPreferences prefs}) {
     final air = ConfigAirQualityService();
-    // TODO(hms): when hmsAvailable, use HmsAccountService / HmsGameService / HmsPushService.
     return HmsServices(
       hmsAvailable: hmsAvailable,
-      account: FakeAccountService(prefs),
+      account: hmsAvailable ? HmsAccountService() : FakeAccountService(prefs),
       game: FakeGameService(prefs),
       push: FakePushService(air),
       airQuality: air,
